@@ -63,6 +63,44 @@ extension AndBibleUITests {
     }
 
     /**
+     Samples hittability only when the element's center is visible in its owning viewport.
+
+     SwiftUI scroll views can publish finite accessibility frames for rows below the fold.
+     Asking XCTest for `isHittable` on those rows can record an invalid-activation-point failure
+     instead of returning false. Reveal helpers pass their real scrolling container; callers whose
+     surface is only an accessibility identity marker use the app window.
+     */
+    func isElementHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        within visibleContainer: XCUIElement? = nil
+    ) -> Bool {
+        guard element.exists, let windowFrame = mainWindowViewport(in: app) else {
+            return false
+        }
+        let elementFrame = element.frame
+        guard elementFrameIsUsable(elementFrame) else {
+            return false
+        }
+        let visibleFrame: CGRect
+        if let visibleContainer {
+            guard visibleContainer.exists else { return false }
+            let containerFrame = visibleContainer.frame
+            guard elementFrameIsUsable(containerFrame) else { return false }
+            visibleFrame = windowFrame.intersection(containerFrame)
+        } else {
+            visibleFrame = windowFrame
+        }
+        guard elementFrameIsUsable(visibleFrame),
+              visibleFrame.contains(
+                  CGPoint(x: elementFrame.midX, y: elementFrame.midY)
+              ) else {
+            return false
+        }
+        return element.isHittable
+    }
+
+    /**
      Waits for a UI-test condition through XCTest's predicate waiter.
 
      - Parameters:
@@ -119,6 +157,27 @@ extension AndBibleUITests {
             timeout: max(0, timeout)
         ) { [weak self] in
             self?.isElementHittable(element) ?? false
+        }
+    }
+
+    /**
+     Waits for an element to become visible in its real viewport and then hittable.
+
+     Pass a scrolling container for controls that may initially exist below its fold. Omit the
+     container when a popup exposes only an accessibility identity marker rather than its bounds.
+     */
+    func waitForElementToBecomeHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        within visibleContainer: XCUIElement? = nil,
+        diagnosticName: String = "resolved UI element",
+        timeout: TimeInterval
+    ) -> Bool {
+        waitForUITestCondition(
+            "Wait for visible \(diagnosticName) to become hittable",
+            timeout: max(0, timeout)
+        ) { [weak self] in
+            self?.isElementHittable(element, in: app, within: visibleContainer) ?? false
         }
     }
 
@@ -739,12 +798,14 @@ extension AndBibleUITests {
     /**
      Awaits text drawn in the on-screen WebView without changing the interaction.
 
-     Vision reads the actual composited WebView screenshot. WebKit can split scripture across
-     accessibility nodes, and an editable note's action label can replace its text in that tree.
-     Screenshot recognition observes both through the same boundary. The main window supplies
-     viewport geometry because XCTest can omit the Application root's frame. These journeys use English
-     fixtures; expected text is never supplied to Vision as a recognition hint. Native toolbar
-     values and diagnostic snapshots cannot satisfy the check.
+     Vision reads the actual composited reader pixels cropped from the owning window. WebKit can
+     split scripture across accessibility nodes, and an editable note's action label can replace
+     its text in that tree.
+     Screenshot recognition observes both through the same boundary. The main window supplies the
+     pixels and viewport geometry because XCTest can omit the Application root's frame and can
+     invalidate an otherwise usable WebView frame while resolving an element screenshot. These
+     journeys use English fixtures; expected text is never supplied to Vision as a recognition
+     hint. Native toolbar values and diagnostic snapshots cannot satisfy the check.
 
      - Parameters:
        - text: Expected text fragment in the rendered document.
@@ -752,8 +813,8 @@ extension AndBibleUITests {
        - timeout: Maximum passive observation time.
        - file: XCTest failure attribution source.
        - line: XCTest failure attribution line.
-     - Side effects: Captures the WebView and recognizes its pixels in the test runner; does not
-       tap, scroll, or alter app state.
+     - Side effects: Captures the owning window, crops to the sampled WebView frame, and recognizes
+       those pixels in the test runner; does not tap, scroll, or alter app state.
      - Failure modes: Records a failure if no matching visible reader text arrives before timeout.
      */
     func waitForVisibleReaderText(
@@ -773,7 +834,13 @@ extension AndBibleUITests {
                 observationStatus = "WebView is unavailable"
                 return false
             }
-            guard let viewport = self.mainWindowViewport(in: app) else {
+            let window = app.windows.firstMatch
+            guard window.exists else {
+                observationStatus = "Main window is unavailable"
+                return false
+            }
+            let viewport = window.frame
+            guard self.elementFrameIsUsable(viewport) else {
                 observationStatus = "Main window has no usable viewport"
                 return false
             }
@@ -782,8 +849,28 @@ extension AndBibleUITests {
             guard self.elementFrameIsUsable(webFrame), viewport.contains(webFrame) else {
                 return false
             }
-            guard let pixels = webView.screenshot().image.cgImage else {
-                observationStatus += "; screenshot has no CGImage"
+            guard let windowPixels = window.screenshot().image.cgImage else {
+                observationStatus += "; window screenshot has no CGImage"
+                return false
+            }
+            let scaleX = CGFloat(windowPixels.width) / viewport.width
+            let scaleY = CGFloat(windowPixels.height) / viewport.height
+            guard scaleX.isFinite, scaleY.isFinite, scaleX > 0, scaleY > 0 else {
+                observationStatus += "; window screenshot has invalid scale"
+                return false
+            }
+            let readerInWindow = webFrame.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
+            let readerPixels = CGRect(
+                x: readerInWindow.minX * scaleX,
+                y: readerInWindow.minY * scaleY,
+                width: readerInWindow.width * scaleX,
+                height: readerInWindow.height * scaleY
+            ).integral.intersection(
+                CGRect(x: 0, y: 0, width: windowPixels.width, height: windowPixels.height)
+            )
+            guard self.elementFrameIsUsable(readerPixels),
+                  let pixels = windowPixels.cropping(to: readerPixels) else {
+                observationStatus += "; reader crop is unavailable"
                 return false
             }
             observationStatus = "Window: \(viewport); WebView: \(webFrame); recognition attempted"

@@ -101,8 +101,15 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
     /// Android Bible versification name.
     public let bibleVersification: String?
 
-    /// Android persisted Bible book index.
+    /// Android persisted JSword BibleBook ordinal. Local noncanonical inputs reset before use.
     public let bibleBook: Int?
+
+    /**
+     Local merge provenance only; not an Android Room column or wire-format change.
+
+     Nil and unknown values cause the complete Bible tuple to reset before materialization.
+     */
+    public let bibleBookEncoding: String?
 
     /// Android persisted Bible chapter number.
     public let bibleChapterNo: Int?
@@ -158,6 +165,17 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
     /// Raw Android serialized JS state blob.
     public let jsState: String?
 
+    /// Complete JSword position safe to materialize into local persistence.
+    public var biblePositionForAndroid: PageManagerBiblePosition {
+        PageManagerBiblePosition.canonicalOrAndroidDefault(
+            encoding: bibleBookEncoding,
+            versification: bibleVersification,
+            bookOrdinal: bibleBook,
+            chapter: bibleChapterNo,
+            verse: bibleVerseNo
+        )
+    }
+
     /**
      Creates one staged Android workspace page-manager row.
 
@@ -165,7 +183,9 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
        - windowID: Identifier shared with the owning Android window row.
        - bibleDocument: Android Bible module initials.
        - bibleVersification: Android Bible versification name.
-       - bibleBook: Android persisted Bible book index.
+       - bibleBook: Android persisted JSword BibleBook ordinal.
+       - bibleBookEncoding: Explicit identity encoding. Android input uses the canonical default;
+         nil and unknown local values reset the complete Bible tuple before materialization.
        - bibleChapterNo: Android persisted Bible chapter number.
        - bibleVerseNo: Android persisted Bible verse number.
        - commentaryDocument: Android commentary module initials.
@@ -191,6 +211,7 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
         bibleDocument: String?,
         bibleVersification: String?,
         bibleBook: Int?,
+        bibleBookEncoding: String? = PageManager.jswordBibleBookEncoding,
         bibleChapterNo: Int?,
         bibleVerseNo: Int?,
         commentaryDocument: String?,
@@ -214,6 +235,7 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
         self.bibleDocument = bibleDocument
         self.bibleVersification = bibleVersification
         self.bibleBook = bibleBook
+        self.bibleBookEncoding = bibleBookEncoding
         self.bibleChapterNo = bibleChapterNo
         self.bibleVerseNo = bibleVerseNo
         self.commentaryDocument = commentaryDocument
@@ -596,6 +618,7 @@ public final class RemoteSyncWorkspaceRestoreService {
         let bibleDocument: String?
         let bibleVersification: String?
         let bibleBook: Int?
+        let bibleBookEncoding: String?
         let bibleChapterNo: Int?
         let bibleVerseNo: Int?
         let commentaryDocument: String?
@@ -873,10 +896,12 @@ public final class RemoteSyncWorkspaceRestoreService {
                     )
                     pageManager.window = window
                     pageManager.bibleDocument = windowSnapshot.pageManager.bibleDocument
-                    pageManager.bibleVersification = windowSnapshot.pageManager.bibleVersification
-                    pageManager.bibleBibleBook = windowSnapshot.pageManager.bibleBook
-                    pageManager.bibleChapterNo = windowSnapshot.pageManager.bibleChapterNo
-                    pageManager.bibleVerseNo = windowSnapshot.pageManager.bibleVerseNo
+                    let biblePosition = windowSnapshot.pageManager.biblePositionForAndroid
+                    pageManager.bibleVersification = biblePosition.versification
+                    pageManager.bibleBibleBook = biblePosition.bookOrdinal
+                    pageManager.bibleChapterNo = biblePosition.chapter
+                    pageManager.bibleVerseNo = biblePosition.verse
+                    pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
                     pageManager.commentaryDocument = windowSnapshot.pageManager.commentaryDocument
                     pageManager.commentaryAnchorOrdinal = windowSnapshot.pageManager.commentaryAnchorOrdinal
                     pageManager.dictionaryDocument = windowSnapshot.pageManager.dictionaryDocument
@@ -1065,6 +1090,7 @@ public final class RemoteSyncWorkspaceRestoreService {
                 bibleDocument: pageManager.bibleDocument,
                 bibleVersification: pageManager.bibleVersification,
                 bibleBook: pageManager.bibleBibleBook,
+                bibleBookEncoding: pageManager.bibleBookEncoding,
                 bibleChapterNo: pageManager.bibleChapterNo,
                 bibleVerseNo: pageManager.bibleVerseNo,
                 commentaryDocument: pageManager.commentaryDocument,
@@ -1180,6 +1206,7 @@ public final class RemoteSyncWorkspaceRestoreService {
             pageManager.bibleDocument = value.bibleDocument
             pageManager.bibleVersification = value.bibleVersification
             pageManager.bibleBibleBook = value.bibleBook
+            pageManager.bibleBookEncoding = value.bibleBookEncoding
             pageManager.bibleChapterNo = value.bibleChapterNo
             pageManager.bibleVerseNo = value.bibleVerseNo
             pageManager.commentaryDocument = value.commentaryDocument

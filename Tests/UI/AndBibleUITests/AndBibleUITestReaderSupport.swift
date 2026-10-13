@@ -429,12 +429,18 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        guard let button = tryResolveReaderActionControl(identifier, in: app, timeout: timeout),
-              waitForElementToBecomeHittable(button, timeout: timeout) else {
+        guard let resolved = tryResolveReaderAction(identifier, in: app, timeout: timeout),
+              waitForElementToBecomeHittable(
+                  resolved.control,
+                  in: app,
+                  within: resolved.visibleContainer,
+                  diagnosticName: identifier,
+                  timeout: timeout
+              ) else {
             XCTFail("Expected a hittable reader action '\(identifier)'", file: file, line: line)
             return
         }
-        button.tap()
+        resolved.control.tap()
     }
 
 
@@ -780,7 +786,8 @@ extension AndBibleUITests {
     func resolveReaderActionElement(
         _ identifier: String,
         in app: XCUIApplication,
-        actionSurface: XCUIElement
+        actionSurface: XCUIElement,
+        visibleContainer: XCUIElement?
     ) -> XCUIElement {
         let title = readerActionTitle(for: identifier)
         let scopedCandidates = [
@@ -789,7 +796,9 @@ extension AndBibleUITests {
             actionSurface.otherElements[identifier].firstMatch,
         ]
 
-        if let visibleCandidate = scopedCandidates.first(where: { isElementHittable($0) }) {
+        if let visibleCandidate = scopedCandidates.first(where: {
+            isElementHittable($0, in: app, within: visibleContainer)
+        }) {
             return visibleCandidate
         }
         if let frameCandidate = scopedCandidates.first(where: { elementHasUsableFrame($0) }) {
@@ -833,7 +842,13 @@ extension AndBibleUITests {
             ? resolvedElement("readerNavigationDrawer", in: app)
             : resolvedElement("readerOverflowMenu", in: app)
         {
-            let finalAction = resolveReaderActionElement(identifier, in: app, actionSurface: finalSurface)
+            let visibleContainer = prefersDrawer ? finalSurface : nil
+            let finalAction = resolveReaderActionElement(
+                identifier,
+                in: app,
+                actionSurface: finalSurface,
+                visibleContainer: visibleContainer
+            )
             XCTAssertTrue(
                 finalAction.exists,
                 "Expected reader action '\(identifier)' to exist within \(timeout) seconds.",
@@ -856,7 +871,12 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
-        return resolveReaderActionElement(identifier, in: app, actionSurface: actionSurface)
+        return resolveReaderActionElement(
+            identifier,
+            in: app,
+            actionSurface: actionSurface,
+            visibleContainer: prefersDrawer ? actionSurface : nil
+        )
     }
 
     /**
@@ -871,23 +891,54 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) -> XCUIElement? {
+        tryResolveReaderAction(identifier, in: app, timeout: timeout)?.control
+    }
+
+    /**
+     Resolves one action together with the real viewport used to prove safe native activation.
+
+     Drawer actions use their ScrollView as the clipping viewport. Overflow popup surfaces are
+     sibling accessibility identity markers, so those fixed actions use the app window instead.
+     */
+    func tryResolveReaderAction(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) -> (control: XCUIElement, visibleContainer: XCUIElement?)? {
         guard let surface = ensureReaderActionSurface(for: identifier, in: app, timeout: timeout) else {
             return nil
         }
+        let visibleContainer = readerActionUsesNavigationDrawer(identifier) ? surface : nil
         let deadline = Date().addingTimeInterval(timeout)
         let directCandidates = readerDirectActionCandidates(identifier, in: app)
         for scrollCount in 0...4 {
             // Popup identity markers are accessibility siblings of their visible rows, so an
             // exact app-level action query is the authoritative lookup for those surfaces.
-            if let directAction = directCandidates.first(where: { isElementHittable($0) }) {
-                return directAction
+            if let directAction = directCandidates.first(where: {
+                isElementHittable($0, in: app, within: visibleContainer)
+            }) {
+                return (directAction, visibleContainer)
             }
 
-            let action = resolveReaderActionElement(identifier, in: app, actionSurface: surface)
-            if waitForElementToBecomeHittable(action, timeout: min(1, max(0, deadline.timeIntervalSinceNow))) {
-                return action
+            let action = resolveReaderActionElement(
+                identifier,
+                in: app,
+                actionSurface: surface,
+                visibleContainer: visibleContainer
+            )
+            if waitForElementToBecomeHittable(
+                action,
+                in: app,
+                within: visibleContainer,
+                diagnosticName: identifier,
+                timeout: min(1, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                return (action, visibleContainer)
             }
-            guard scrollCount < 4, Date() < deadline, elementHasUsableFrame(surface) else { return nil }
+            guard visibleContainer != nil,
+                  scrollCount < 4,
+                  Date() < deadline,
+                  elementHasUsableFrame(surface) else { return nil }
             surface.swipeUp()
         }
         return nil

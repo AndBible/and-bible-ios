@@ -120,6 +120,32 @@ final class GenericSwordChooserContractsTests: XCTestCase {
         )
     }
 
+    /** RawGenBook rows display JSword's leaf name while retaining their exact selectable path. */
+    func testGeneralBookTreeKeyDisplayNameKeepsFullPathAsIdentity() {
+        let keys = [
+            "/",
+            "/Westminster21",
+            "/Westminster21/Westminster21",
+            "/Westminster21/Westminster21/WCF",
+            "/Westminster21/Westminster21/WCF/Ch 6",
+            "/Westminster21/Westminster21/WCF/Ch 7",
+        ]
+        let selectedKey = keys[4]
+
+        XCTAssertEqual(
+            AndroidJSwordGenBookKeyResolution.displayName(
+                forSourceKey: selectedKey,
+                sourceKeys: keys
+            ),
+            "Ch 6"
+        )
+        XCTAssertEqual(selectedKey, "/Westminster21/Westminster21/WCF/Ch 6")
+        XCTAssertEqual(
+            AndroidJSwordGenBookKeyResolution.presentableSourceKeys(keys),
+            Array(keys.dropFirst())
+        )
+    }
+
     /**
      Verifies a key-list backend failure never takes the successful empty-module path.
 

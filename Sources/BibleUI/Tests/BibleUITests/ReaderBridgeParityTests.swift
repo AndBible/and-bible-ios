@@ -1038,22 +1038,41 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies a second Compare request owns completion when the first build finishes later.
+     Verifies a newer Compare request cancels in-flight obsolete work before it can publish.
 
-     - Setup: Two requests are queued before the production preparation queue resumes.
-     - Expected result: Only the newer payload reaches Vue after the queue finishes.
-     - Failure meaning: Compare requests are ordered by completion instead of content intent.
-     - Determinism: A condition-backed gate records invocation order and controls only the first.
+     - Setup: The older request enters source capture and remains blocked while the newer request
+       claims replacement ownership.
+     - Expected result: The older request settles cancelled without emitting, then only the newer
+       payload reaches Vue after source capture resumes.
+     - Failure meaning: Obsolete in-flight Compare work can publish after newer content intent.
+     - Determinism: An explicit source-entry handshake and awaited publication dispositions define
+       ordering without a bridge polling deadline.
      */
     @MainActor
-    func testNewestCompareWinsWhenEarlierBuildCompletesLast() throws {
+    func testNewestCompareCancelsInFlightOlderRequestBeforePublication() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let firstOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
         let secondOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
         let workerQueue = DispatchQueue(label: "ReaderBridgeParityTests-newest-compare")
-        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: workerQueue)
+        let olderSourceEntered = expectation(description: "older Compare enters source capture")
+        let captureGate = ReaderBridgeCompareCaptureGate()
+        defer { captureGate.release() }
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: workerQueue,
+            phaseObserver: { phase, _, key in
+                guard phase == .sourceCapture,
+                      case .compositeRequest(
+                        .compareOrdinals(_, let startOrdinal, let endOrdinal)
+                      ) = key.annotationIdentity,
+                      startOrdinal == firstOrdinal,
+                      endOrdinal == firstOrdinal,
+                      captureGate.claimFirstCapture() else { return }
+                olderSourceEntered.fulfill()
+                captureGate.blockUntilReleased()
+            }
+        )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(
             bridge: bridge,
@@ -1061,27 +1080,39 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             documentPreparationCoordinator: coordinator
         )
         controller.bridgeDidSetClientReady(bridge)
-        XCTAssertTrue(waitUntil { scripts().contains { $0.contains("emit('add_documents'") } })
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: 0
+        )
         let baseline = scripts().count
-        workerQueue.suspend()
 
-        controller.loadCompareDocument(
-            bookInitials: "KJV",
-            startOrdinal: firstOrdinal,
-            endOrdinal: firstOrdinal
-        )
-        controller.loadCompareDocument(
-            bookInitials: "KJV",
-            startOrdinal: secondOrdinal,
-            endOrdinal: secondOrdinal
-        )
-        workerQueue.resume()
-        XCTAssertTrue(waitUntil {
-            (try? bridgeEmissionPayloads(
-                from: Array(scripts().dropFirst(baseline)),
-                event: "add_documents"
-            ))?.contains { ($0 as? [String: Any])?["compare"] as? Bool == true } == true
+        let older = Task { @MainActor in
+            await controller.loadCompareDocumentAwaitingSelection(.ordinals(
+                bookInitials: "KJV",
+                startOrdinal: firstOrdinal,
+                endOrdinal: firstOrdinal
+            ))
+        }
+        defer { older.cancel() }
+        await fulfillment(of: [olderSourceEntered], timeout: 2)
+        let newer = Task { @MainActor in
+            await controller.loadCompareDocumentAwaitingSelection(.ordinals(
+                bookInitials: "KJV",
+                startOrdinal: secondOrdinal,
+                endOrdinal: secondOrdinal
+            ))
+        }
+        defer { newer.cancel() }
+        let olderDisposition = await older.value
+        XCTAssertEqual(olderDisposition, .cancelled)
+        XCTAssertFalse(scripts().dropFirst(baseline).contains {
+            $0.contains("emit('add_documents'")
         })
+
+        captureGate.release()
+        let newerDisposition = await newer.value
+        XCTAssertEqual(newerDisposition, .accepted)
 
         let compareDocuments = try bridgeEmissionPayloads(
             from: Array(scripts().dropFirst(baseline)),
@@ -1248,7 +1279,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
@@ -1409,7 +1442,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 22
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -1533,7 +1568,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 22
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -1621,7 +1658,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 24
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -1694,7 +1733,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 24
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -2000,7 +2041,14 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(targetController.currentBook, "Genesis")
         XCTAssertEqual(targetController.currentChapter, expectedChapter)
         XCTAssertEqual(targetController.currentVerse, 0)
-        XCTAssertEqual(targetPageManager.bibleBibleBook, 0)
+        XCTAssertEqual(
+            targetPageManager.bibleBibleBook,
+            JSwordBibleBook.ordinal(forOSIS: "Gen")
+        )
+        XCTAssertEqual(
+            targetPageManager.bibleBookEncoding,
+            PageManager.jswordBibleBookEncoding
+        )
         XCTAssertEqual(targetPageManager.bibleChapterNo, expectedChapter)
         XCTAssertEqual(targetPageManager.bibleVerseNo, 0)
 
@@ -2091,7 +2139,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 2
         window.pageManager = pageManager
@@ -2252,7 +2302,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
@@ -2561,7 +2613,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let pageManager = try XCTUnwrap(window.pageManager)
         windowManager.setActiveWorkspace(workspace)
         let target = try XCTUnwrap(windowManager.addWindow(from: window))
-        window.pageManager?.bibleBibleBook = 0
+        window.pageManager?.bibleBibleBook = try XCTUnwrap(
+            JSwordBibleBook.ordinal(forOSIS: "Gen")
+        )
+        window.pageManager?.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        window.pageManager?.bibleVersification = "KJV"
         window.pageManager?.bibleChapterNo = 1
         window.pageManager?.bibleVerseNo = 2
         window.isSynchronized = true
@@ -2641,7 +2697,8 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, "Genesis")
         XCTAssertEqual(controller.currentChapter, 1)
         XCTAssertEqual(controller.currentVerse, 1)
-        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 1)
         XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
@@ -2682,7 +2739,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
@@ -2797,6 +2856,148 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies toolbar adjacency stays inside the active general-book source ordering.
+
+     The reader first accepts its client-ready Bible render, matching the UI boundary before a user
+     can open the document chooser. The real SWORD-backed fixture then begins on its middle key so
+     both directions are available. Next must load the exact following key through the ordinary
+     general-book pipeline, then disable at the source boundary without borrowing the pane's hidden
+     Bible chapter state.
+     */
+    @MainActor
+    func testGeneralBookToolbarNavigationUsesExactSourceAdjacentKeys() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeRawLDModule(
+            named: "ToolbarBook",
+            category: "Generic Books",
+            description: "Toolbar General Book",
+            entries: [
+                ("FIRST-ENTRY", "<div><p>First.</p></div>"),
+                ("SECOND-ENTRY", "<div><p>Second.</p></div>"),
+                ("THIRD-ENTRY", "<div><p>Third.</p></div>"),
+            ],
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let toolbarBook = try XCTUnwrap(manager.module(named: "ToolbarBook"))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = JSwordKJVAVersification.name
+        pageManager.bibleChapterNo = 9
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        let initialBibleBoundary = scripts().count
+        controller.bridgeDidSetClientReady(bridge)
+        let initialBibleEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: initialBibleBoundary
+        )
+        let initialBibleDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: initialBibleEmissions, event: "add_documents")
+                as? [String: Any]
+        )
+        XCTAssertEqual(initialBibleDocument["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(
+            controller.switchGeneralBookDocument(to: "ToolbarBook"),
+            .switchedRequiringKeySelection
+        )
+
+        let expectedSourceKeys = ["FIRST-ENTRY", "SECOND-ENTRY", "THIRD-ENTRY"]
+        let sourceKeys = try toolbarBook.loadAllKeys()
+        XCTAssertEqual(sourceKeys, expectedSourceKeys)
+        XCTAssertTrue(try toolbarBook.containsExactKey("SECOND-ENTRY"))
+        let middleFragment = try toolbarBook.rawOSISFragment(forKey: "SECOND-ENTRY")
+        XCTAssertEqual(middleFragment.key, "SECOND-ENTRY")
+        XCTAssertTrue(middleFragment.hasRenderableContent)
+
+        controller.loadGeneralBookEntry(key: "SECOND-ENTRY")
+        try await awaitReaderCondition("accepted middle general-book render") {
+            controller.currentCategory == .generalBook
+                && controller.currentGeneralBookKey == "SECOND-ENTRY"
+                && controller.renderedContentState.contains("module=ToolbarBook")
+                && controller.renderedContentState.contains("key=SECOND-ENTRY")
+        }
+        let renderedSourceKeys = try toolbarBook.loadAllKeys()
+        let currentKey = try XCTUnwrap(controller.currentGeneralBookKey)
+        XCTAssertTrue(
+            controller.activeGeneralBookModule === toolbarBook,
+            "Rendered module differs from enumerated module; currentKey=\(currentKey), keys=\(renderedSourceKeys)"
+        )
+        XCTAssertEqual(
+            renderedSourceKeys,
+            expectedSourceKeys,
+            "RawLD source keys changed after accepted render; currentKey=\(currentKey)"
+        )
+        XCTAssertTrue(
+            renderedSourceKeys.contains {
+                SwordJavaExactStringIdentity($0) == SwordJavaExactStringIdentity(currentKey)
+            },
+            "Committed key is absent by Java-exact identity; currentKey=\(currentKey), keys=\(renderedSourceKeys)"
+        )
+        try await awaitReaderCondition("middle general-book adjacency") {
+            controller.hasPrevious && controller.hasNext
+        }
+
+        var baseline = scripts().count
+        controller.navigateNext()
+        let nextEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let nextDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: nextEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(nextDocument["key"] as? String, "THIRD-ENTRY")
+        XCTAssertEqual(controller.currentGeneralBookKey, "THIRD-ENTRY")
+        XCTAssertEqual(pageManager.generalBookKey, "THIRD-ENTRY")
+        XCTAssertEqual(pageManager.bibleChapterNo, 9)
+        try await awaitReaderCondition("last general-book boundary") {
+            controller.hasPrevious && !controller.hasNext
+        }
+
+        baseline = scripts().count
+        controller.navigatePrevious()
+        let previousEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let previousDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: previousEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(previousDocument["key"] as? String, "SECOND-ENTRY")
+        try await awaitReaderCondition("restored middle general-book adjacency") {
+            controller.hasPrevious && controller.hasNext
+        }
+
+        baseline = scripts().count
+        controller.navigatePrevious()
+        let firstEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let firstDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: firstEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(firstDocument["key"] as? String, "FIRST-ENTRY")
+        XCTAssertEqual(controller.currentGeneralBookKey, "FIRST-ENTRY")
+        XCTAssertEqual(pageManager.generalBookKey, "FIRST-ENTRY")
+        XCTAssertEqual(pageManager.bibleChapterNo, 9)
+        try await awaitReaderCondition("first general-book boundary") {
+            !controller.hasPrevious && controller.hasNext
+        }
+    }
+
+    /**
      Verifies real generic module switches preserve an exact key shared by the target module.
 
      - Setup: Restores source dictionary, general-book, and map modules at `SHARED-KEY`, then switches
@@ -2878,9 +3079,12 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
 
      The real Calvin fixture yields document-local ordinal 11 inside Genesis 1:24. The test accepts
      that visible callback, visits the same KJV position, and returns through the public document
-     switches. Vue must receive ordinal 11 in `setup_content`. A later visit to Genesis 1:22 must
-     receive zero, proving an old local ordinal cannot attach to a different commentary block. A
-     recreated controller also receives zero because the raw persisted ordinal lacks a source-key
+     switches. One delayed Genesis 1:22 callback from the outgoing Bible document arrives while the
+     commentary replacement is pending. The stale callback must not rewrite the selected Genesis
+     1:24 intent or its durable PageManager position. Vue must then receive ordinal 11 in
+     `setup_content` without waiting for another scroll callback. A later visit to Genesis 1:22
+     must receive zero, proving an old local ordinal cannot attach to a different commentary block.
+     A recreated controller also receives zero because the raw persisted ordinal lacks a source-key
      receipt.
 
      - Side effects: Installs temporary SWORD fixtures and records bridge replacement emissions.
@@ -2895,7 +3099,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 22
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -2962,6 +3168,21 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         boundary = scripts().count
         XCTAssertEqual(controller.switchCommentaryDocument(to: "CALVINRESTORE"), .switched)
+        let outgoingBibleOrdinal = try XCTUnwrap(
+            manager.module(named: "KJV")?.verseOrdinal(
+                osisBookId: "Gen",
+                chapter: 1,
+                verse: 22
+            )
+        )
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: outgoingBibleOrdinal,
+            key: "Gen.1.22",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentVerse, 24)
+        XCTAssertEqual(pageManager.bibleVerseNo, 24)
         let restored = try await awaitBridgeEmission(
             from: scripts,
             event: "setup_content",
@@ -2971,6 +3192,10 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             bridgeEmissionPayload(from: restored, event: "setup_content") as? [String: Any]
         )
         XCTAssertEqual(restoredSetup["jumpToOrdinal"] as? Int, 11)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 24)
+        XCTAssertEqual(pageManager.bibleVerseNo, 24)
 
         boundary = scripts().count
         XCTAssertEqual(controller.switchBibleDocument(to: "KJV"), .switched)
@@ -3036,6 +3261,76 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, deletedBook)
         XCTAssertEqual(controller.currentChapter, deletedChapter)
         XCTAssertEqual(controller.currentVerse, deletedVerse)
+    }
+
+    /**
+     Verifies an outgoing Bible document cannot overwrite a newer same-family replacement intent.
+
+     The initial Genesis document reports one delayed visible-position callback after native
+     navigation has selected Exodus but before the replacement is accepted. That old generation
+     must not move the native cursor. Once Exodus is accepted, ordinary telemetry from its DOM must
+     still update the visible verse.
+
+     - Side effects: Installs a temporary KJV fixture and records bridge replacement emissions.
+     - Failure modes: Fixture capture and asynchronous bridge publication can throw or time out.
+     */
+    @MainActor
+    func testPendingBibleReplacementRejectsOutgoingGenerationTelemetry() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let genesisOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 22)
+        )
+        let exodusOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Exod", chapter: 2, verse: 2)
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 22
+        retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 22)
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: 0)
+
+        let boundary = scripts().count
+        controller.navigateTo(book: "Exodus", chapter: 2, verse: 1)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: genesisOrdinal,
+            key: "Gen.1",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: exodusOrdinal,
+            key: "Exod.2",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 2)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 2)
     }
 
 
@@ -3292,6 +3587,37 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         await fulfillment(of: [persisted], timeout: 1)
         XCTAssertEqual(persistCount, 1)
         withExtendedLifetime((container, store, manager)) {}
+    }
+}
+
+/** One-shot gate that holds the first Compare source phase while newer intent supersedes it. */
+private final class ReaderBridgeCompareCaptureGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var claimed = false
+    private var released = false
+
+    /** Claims only the first observed source capture for blocking. */
+    func claimFirstCapture() -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        guard !claimed else { return false }
+        claimed = true
+        return true
+    }
+
+    /** Blocks the claimed worker until the test admits subsequent preparation. */
+    func blockUntilReleased() {
+        condition.lock()
+        while !released { condition.wait() }
+        condition.unlock()
+    }
+
+    /** Releases the claimed worker; repeated cleanup calls are harmless. */
+    func release() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
     }
 }
 

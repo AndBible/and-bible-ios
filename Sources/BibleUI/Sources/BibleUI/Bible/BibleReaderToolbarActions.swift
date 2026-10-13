@@ -1,4 +1,17 @@
+import BibleCore
 import SwiftUI
+
+extension DocumentCategory {
+    /** Whether this category is owned by Android's commentary/document-library quick action. */
+    var usesCommentaryDocumentToolbarAction: Bool {
+        switch self {
+        case .commentary, .dictionary, .generalBook, .epub:
+            return true
+        case .bible, .map, .dailyDevotion:
+            return false
+        }
+    }
+}
 
 /**
  Captures the Bible toolbar trigger bounds so Android-style popups can anchor to the button.
@@ -339,6 +352,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
             .disabled(!moduleActionsEnabled)
             .accessibilityIdentifier(accessibilityIdentifier)
             .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(isActive ? "active" : "inactive")
             .accessibilityHidden(!moduleActionsEnabled)
     }
 

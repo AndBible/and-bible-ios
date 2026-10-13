@@ -335,6 +335,7 @@ final class WindowCloneFidelityTests: XCTestCase {
         let bibleDocument: String?
         let bibleVersification: String?
         let bibleBibleBook: Int?
+        let bibleBookEncoding: String?
         let bibleChapterNo: Int?
         let bibleVerseNo: Int?
         let commentaryDocument: String?
@@ -356,6 +357,7 @@ final class WindowCloneFidelityTests: XCTestCase {
             bibleDocument = pageManager.bibleDocument
             bibleVersification = pageManager.bibleVersification
             bibleBibleBook = pageManager.bibleBibleBook
+            bibleBookEncoding = pageManager.bibleBookEncoding
             bibleChapterNo = pageManager.bibleChapterNo
             bibleVerseNo = pageManager.bibleVerseNo
             commentaryDocument = pageManager.commentaryDocument
@@ -524,6 +526,7 @@ final class WindowCloneFidelityTests: XCTestCase {
                 $0.bibleDocument = "KJV"
                 $0.bibleVersification = "KJVA"
                 $0.bibleBibleBook = 42
+                $0.bibleBookEncoding = PageManager.jswordBibleBookEncoding
                 $0.bibleChapterNo = 3
                 $0.bibleVerseNo = 16
             },
@@ -534,7 +537,9 @@ final class WindowCloneFidelityTests: XCTestCase {
     private func seedCompleteReaderState(on pageManager: PageManager, index: Int) {
         pageManager.bibleDocument = "Bible-\(index)"
         pageManager.bibleVersification = "KJVA"
-        pageManager.bibleBibleBook = index % 66
+        // JSword's canonical Old Testament ordinals are contiguous from Genesis through Malachi.
+        pageManager.bibleBibleBook = 2 + (index % 39)
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
         pageManager.bibleChapterNo = index + 1
         pageManager.bibleVerseNo = index + 2
         pageManager.commentaryDocument = "Commentary-\(index)"

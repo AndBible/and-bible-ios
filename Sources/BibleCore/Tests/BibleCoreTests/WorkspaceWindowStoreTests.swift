@@ -175,6 +175,10 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertEqual(store.workspaces().map(\.name), ["Original", "Later"])
 
         let sourcePrimaryWindow = try XCTUnwrap((source.windows ?? []).first)
+        sourcePrimaryWindow.pageManager?.bibleBibleBook = JSwordBibleBook.ordinal(forOSIS: "Ps")
+        sourcePrimaryWindow.pageManager?.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        sourcePrimaryWindow.pageManager?.bibleChapterNo = 119
+        sourcePrimaryWindow.pageManager?.bibleVerseNo = 1
         store.addHistoryItem(to: sourcePrimaryWindow, document: "KJV", key: "Gen.1.1")
         let secondaryWindow = store.addWindow(to: source, document: "KJV", category: "bible")
         store.addHistoryItem(to: secondaryWindow, document: "KJV", key: "Gen.1.2")
@@ -199,6 +203,16 @@ final class WorkspaceWindowStoreTests: XCTestCase {
             ["Gen.1.1", "Gen.1.2"]
         )
         XCTAssertTrue(clonedWindows.allSatisfy { store.history(windowId: $0.id).isEmpty })
+        let clonedPsalm = try XCTUnwrap(clonedWindows.first(where: {
+            $0.orderNumber == sourcePrimaryWindow.orderNumber
+        })?.pageManager)
+        XCTAssertEqual(clonedPsalm.bibleBibleBook, 20)
+        XCTAssertEqual(clonedPsalm.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(clonedPsalm.bibleChapterNo, 119)
+        XCTAssertEqual(clonedPsalm.bibleVerseNo, 1)
+        XCTAssertEqual(clonedWindows.first(where: {
+            $0.orderNumber == secondaryWindow.orderNumber
+        })?.pageManager?.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
 
         store.delete(clone)
 
@@ -540,7 +554,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
             windowID: replacementWindowID,
             bibleDocument: "SYNCHRONIZED",
             bibleVersification: "KJVA",
-            bibleBook: 0,
+            bibleBook: 2,
             bibleChapterNo: 2,
             bibleVerseNo: 3,
             commentaryDocument: nil,

@@ -249,7 +249,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: windowID,
                     bibleDocument: "KJV",
                     bibleVersification: "KJVA",
-                    bibleBook: 0,
+                    bibleBook: 2,
                     bibleChapterNo: 1,
                     bibleVerseNo: 1,
                     commentaryDocument: "MHC",
@@ -547,7 +547,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: firstWindowID,
                     bibleDocument: "KJV",
                     bibleVersification: "KJVA",
-                    bibleBook: 0,
+                    bibleBook: 2,
                     bibleChapterNo: 2,
                     bibleVerseNo: 3,
                     commentaryDocument: "MHC",
@@ -570,7 +570,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: secondWindowID,
                     bibleDocument: "ESV",
                     bibleVersification: "KJVA",
-                    bibleBook: 1,
+                    bibleBook: 3,
                     bibleChapterNo: 4,
                     bibleVerseNo: 5,
                     commentaryDocument: "TSK",
@@ -661,6 +661,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
 
         let pageManagers = try committedContext.fetch(FetchDescriptor<PageManager>()).sorted { $0.id.uuidString < $1.id.uuidString }
         XCTAssertEqual(pageManagers.count, 2)
+        XCTAssertTrue(pageManagers.allSatisfy {
+            $0.bibleBookEncoding == PageManager.jswordBibleBookEncoding
+        }, "Android rows must retain their explicit JSword book identity on restore")
         XCTAssertEqual(pageManagers.first(where: { $0.id == firstWindowID })?.currentCategoryName, "general_book")
         // Android MYNOTE windows restore into iOS's `mynote` page-manager key so the reader
         // reopens the My Notes page instead of collapsing the window to the Bible text.
@@ -761,6 +764,10 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 layoutState: "split"
             )
             let oldPageManager = PageManager(id: oldWindowID, currentCategoryName: "commentary")
+            oldPageManager.bibleBibleBook = 20
+            oldPageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+            oldPageManager.bibleChapterNo = 119
+            oldPageManager.bibleVerseNo = 1
             oldPageManager.commentaryDocument = "MHC"
             oldPageManager.commentaryAnchorOrdinal = 123
             let oldHistory = HistoryItem(
@@ -801,7 +808,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             windowID: replacementWindowID,
             bibleDocument: "ESV",
             bibleVersification: "KJVA",
-            bibleBook: 0,
+            bibleBook: 2,
             bibleChapterNo: 2,
             bibleVerseNo: 3,
             commentaryDocument: nil,
@@ -1421,7 +1428,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: firstWindowID,
                     bibleDocument: "KJV",
                     bibleVersification: "KJVA",
-                    bibleBook: 0,
+                    bibleBook: 2,
                     bibleChapterNo: 1,
                     bibleVerseNo: 1,
                     commentaryDocument: "MHC",
@@ -1540,7 +1547,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: firstWindowID,
                     bibleDocument: "ESV",
                     bibleVersification: "KJVA",
-                    bibleBook: 1,
+                    bibleBook: 3,
                     bibleChapterNo: 2,
                     bibleVerseNo: 3,
                     commentaryDocument: "TSK",
@@ -1563,7 +1570,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: secondWindowID,
                     bibleDocument: "NET",
                     bibleVersification: "KJVA",
-                    bibleBook: 39,
+                    bibleBook: 42,
                     bibleChapterNo: 5,
                     bibleVerseNo: 3,
                     commentaryDocument: "MHC",
@@ -1741,8 +1748,8 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 .init(id: secondWindowID, workspaceID: workspaceID, isSynchronized: true, isPinMode: false, isLinksWindow: false, orderNumber: 1, syncGroup: 0, layoutState: "split", layoutWeight: 1.0),
             ],
             pageManagers: [
-                .init(windowID: firstWindowID, bibleDocument: "KJV", bibleVersification: "KJVA", bibleBook: 0, bibleChapterNo: 1, bibleVerseNo: 1, currentCategoryName: "BIBLE"),
-                .init(windowID: secondWindowID, bibleDocument: "ESV", bibleVersification: "KJVA", bibleBook: 1, bibleChapterNo: 2, bibleVerseNo: 3, currentCategoryName: "BIBLE"),
+                .init(windowID: firstWindowID, bibleDocument: "KJV", bibleVersification: "KJVA", bibleBook: 2, bibleChapterNo: 1, bibleVerseNo: 1, currentCategoryName: "BIBLE"),
+                .init(windowID: secondWindowID, bibleDocument: "ESV", bibleVersification: "KJVA", bibleBook: 3, bibleChapterNo: 2, bibleVerseNo: 3, currentCategoryName: "BIBLE"),
             ],
             historyItems: [
                 .init(remoteID: 701, windowID: firstWindowID, createdAt: Date(timeIntervalSince1970: 1_735_810_000), document: "KJV", key: "Gen.1.1", anchorOrdinal: 10),
@@ -1916,7 +1923,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 .init(id: windowID, workspaceID: workspaceID, isSynchronized: true, isPinMode: false, isLinksWindow: false, orderNumber: 0, syncGroup: 0, layoutState: "split", layoutWeight: 1.0)
             ],
             pageManagers: [
-                .init(windowID: windowID, bibleDocument: "KJV", bibleVersification: "KJVA", bibleBook: 0, bibleChapterNo: 1, bibleVerseNo: 1, currentCategoryName: "BIBLE")
+                .init(windowID: windowID, bibleDocument: "KJV", bibleVersification: "KJVA", bibleBook: 2, bibleChapterNo: 1, bibleVerseNo: 1, currentCategoryName: "BIBLE")
             ],
             historyItems: [
                 .init(remoteID: 801, windowID: windowID, createdAt: Date(timeIntervalSince1970: 1_735_820_000), document: "KJV", key: "Gen.1.1", anchorOrdinal: 10)
@@ -2018,7 +2025,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: windowID,
                     bibleDocument: "KJV",
                     bibleVersification: "KJVA",
-                    bibleBook: 0,
+                    bibleBook: 2,
                     bibleChapterNo: 1,
                     bibleVerseNo: 1,
                     currentCategoryName: "BIBLE",
@@ -2300,7 +2307,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: windowID,
                     bibleDocument: "KJV",
                     bibleVersification: "KJVA",
-                    bibleBook: 0,
+                    bibleBook: 2,
                     bibleChapterNo: 1,
                     bibleVerseNo: 1,
                     currentCategoryName: "BIBLE",
@@ -2745,7 +2752,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     windowID: windowID,
                     bibleDocument: "KJV",
                     bibleVersification: "KJVA",
-                    bibleBook: 0,
+                    bibleBook: 2,
                     bibleChapterNo: 1,
                     bibleVerseNo: 1,
                     currentCategoryName: "BIBLE",
@@ -3491,7 +3498,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             windowID: UUID,
             bibleDocument: String? = nil,
             bibleVersification: String = "KJVA",
-            bibleBook: Int = 0,
+            bibleBook: Int = 2,
             bibleChapterNo: Int = 1,
             bibleVerseNo: Int = 1,
             commentaryDocument: String? = nil,
@@ -3800,6 +3807,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         let reopenedPageManagers = try reopenedContext.fetch(FetchDescriptor<PageManager>())
         XCTAssertEqual(reopenedPageManagers.map(\.id), [oldWindowID])
         XCTAssertEqual(reopenedPageManagers.first?.window?.id, oldWindowID)
+        XCTAssertEqual(reopenedPageManagers.first?.bibleBibleBook, 20)
+        XCTAssertEqual(reopenedPageManagers.first?.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(reopenedPageManagers.first?.bibleChapterNo, 119)
         XCTAssertEqual(reopenedPageManagers.first?.commentaryDocument, "MHC")
         XCTAssertEqual(reopenedPageManagers.first?.commentaryAnchorOrdinal, 123)
 

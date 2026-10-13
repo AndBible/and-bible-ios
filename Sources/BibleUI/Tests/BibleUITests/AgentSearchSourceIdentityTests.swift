@@ -6,6 +6,9 @@ import XCTest
 @testable import BibleUI
 @testable import SwordKit
 
+/// SQLite copy marker used by the deterministic generated-index fixtures in this file.
+private let agentSearchFixtureSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 /** Verifies AI Search tools authorize the exact readable source generation they query. */
 final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
     /**
@@ -71,15 +74,16 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
     /**
      Rejects stale same-initials rows across text, Strong's, and installed-document readiness.
 
-     - Setup: Indexes the readable KJV fixture, proves all three Agent projections are ready, then
-       changes only durable source-fingerprint metadata. Name-only compatibility readiness remains
-       true while the current installed source identity no longer matches.
+     - Setup: Seeds text and Strong's rows for the readable KJV fixture's exact source identity,
+       proves all three Agent projections are ready, then changes only durable source-fingerprint
+       metadata. Name-only compatibility readiness remains true while the current installed source
+       identity no longer matches.
      - Expected result: Explicit and automatic selection fail with their stable not-indexed errors,
        and installed metadata reports `isIndexed=false`; before corruption every route succeeds and
        metadata reports true.
      - Failure meaning: AI can query or advertise rows produced by a replaced same-initials backend.
      - Side effects: Copies one temporary SWORD fixture, creates transient SwiftData containers and
-       one generated Search database, then removes filesystem fixtures during teardown/defer cleanup.
+       one deterministic Search database, then removes filesystem fixtures during teardown/defer cleanup.
      */
     @MainActor
     func testAgentSearchRequiresCurrentInstalledSourceIdentity() async throws {
@@ -91,38 +95,50 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
             .appendingPathComponent("agent-search-identity-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: databaseURL) }
         let searchIndexService = SearchIndexService(databasePath: databaseURL.path)
-        try await searchIndexService.createIndex(module: module)
+        try await seedAgentSearchIndex(module: module, service: searchIndexService)
         let adapter = try makeAdapter(
             swordManager: manager,
             searchIndexService: searchIndexService
         )
 
-        XCTAssertNoThrow(try adapter.searchBible(
+        let explicitTextSearch = try adapter.searchBible(
             query: "beginning",
             books: ["KJV"],
             maximum: 20,
             offset: 0
-        ))
-        XCTAssertNoThrow(try adapter.searchBible(
+        )
+        let automaticTextSearch = try adapter.searchBible(
             query: "beginning",
             books: [],
             maximum: 20,
             offset: 0
-        ))
-        XCTAssertNoThrow(try adapter.searchByStrongs(
+        )
+        for result in [explicitTextSearch, automaticTextSearch] {
+            XCTAssertEqual(
+                result.data?.objectValue?["results"]?.arrayValue?.compactMap {
+                    $0.objectValue?["book"]?.stringValue
+                },
+                ["KJV"]
+            )
+        }
+        let explicitStrongsSearch = try adapter.searchByStrongs(
             reportedNumber: "H0430",
             canonicalToken: "H0430",
             book: "KJV",
             maximum: 20,
             offset: 0
-        ))
-        XCTAssertNoThrow(try adapter.searchByStrongs(
+        )
+        let automaticStrongsSearch = try adapter.searchByStrongs(
             reportedNumber: "H0430",
             canonicalToken: "H0430",
             book: nil,
             maximum: 20,
             offset: 0
-        ))
+        )
+        for result in [explicitStrongsSearch, automaticStrongsSearch] {
+            XCTAssertEqual(result.data?.objectValue?["searchedBook"]?.stringValue, "KJV")
+            XCTAssertEqual(result.data?.objectValue?["results"]?.arrayValue?.count, 1)
+        }
         XCTAssertEqual(
             try installedIndexFlag(from: adapter.getInstalledDocuments(category: .bible), named: "KJV"),
             .bool(true)
@@ -194,8 +210,8 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
      Keeps implicit Search/Strong's tools aligned with prompt BookSet order.
 
      - Setup: Registers an initials-first native Bible with abbreviation `Zulu` and an initials-last
-       Bible with abbreviation `Alpha`, indexes both exact source generations, and leaves KJV
-       unindexed.
+       Bible with abbreviation `Alpha`, seeds query rows for both exact source generations, and
+       leaves KJV unindexed.
      - Expected result: Android's installed BookSet reverses initials order through its abbreviation
        tier, while the prompt default, empty-book Search, and nil-book Strong's tool all select the
        Alpha-abbreviation Bible.
@@ -237,8 +253,8 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
             .appendingPathComponent("agent-search-bookset-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: databaseURL) }
         let searchIndexService = SearchIndexService(databasePath: databaseURL.path)
-        try await searchIndexService.createIndex(module: initialsFirstModule)
-        try await searchIndexService.createIndex(module: bookSetModule)
+        try await seedAgentSearchIndex(module: initialsFirstModule, service: searchIndexService)
+        try await seedAgentSearchIndex(module: bookSetModule, service: searchIndexService)
 
         let resolver = BibleReaderInstalledModuleResolver(
             swordManager: manager,
@@ -291,6 +307,126 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
             selectedGreekMorphology: []
         )
         XCTAssertEqual(promptEnvironment.defaultSearchBible?.initials, bookSetFirst)
+    }
+
+    /**
+     Seeds the smallest complete generated index that exercises Agent source authorization.
+
+     The adapter tests in this class own installed-source selection and identity validation. Full
+     canonical streaming, transaction publication, and generated-index replacement are covered by
+     BibleCore. Binding the real module identity here keeps those contracts separate while retaining
+     production text analysis, FTS querying, Strong's querying, and readiness checks.
+
+     - Parameters:
+       - module: Real installed SWORD module whose exact source generation owns the fixture rows.
+       - service: Isolated production Search service initialized with the current schema.
+     - Side effects: Inserts one text row, one Strong's row, and matching completion metadata on the
+       service's serialized test mutation queue.
+     - Throws: Text analysis or SQLite preparation, binding, and execution failures.
+     */
+    private func seedAgentSearchIndex(
+        module: SwordModule,
+        service: SearchIndexService
+    ) async throws {
+        let identity = module.searchIndexSourceIdentity
+        let analyzer = SearchTextAnalyzer.profile(for: module.info.language)
+        let analyzedText = try SearchTextAnalyzer.analyzedText(
+            "In the beginning God created the heaven and the earth.",
+            profile: analyzer
+        )
+        try await service.performIndexMutationForTesting { database in
+            try self.executeAgentSearchFixtureStatement(
+                database: database,
+                sql: """
+                INSERT INTO verse_fts (
+                    search_text, verse_key, plain_text, module_name, entry_order, osis_book,
+                    display_book, display_book_mode, chapter, verse, book_order, canon_scope
+                ) VALUES (?, 'Genesis 1:1', 'In the beginning God created the heaven and the earth.',
+                          ?, 0, 'Gen', 'Genesis', 'source', 1, 1, 2, 'ot')
+                """,
+                values: [analyzedText, identity.moduleName]
+            )
+            try self.executeAgentSearchFixtureStatement(
+                database: database,
+                sql: """
+                INSERT INTO verse_strongs (
+                    module_name, token, verse_key, entry_order, highlight_ranges
+                ) VALUES (?, 'H0430', 'Genesis 1:1', 0, '')
+                """,
+                values: [identity.moduleName]
+            )
+            try self.executeAgentSearchFixtureStatement(
+                database: database,
+                sql: """
+                INSERT INTO indexed_modules (
+                    module_name, verse_count, indexed_at, schema_version, language_code, analyzer_id,
+                    strongs_complete, source_version, source_fingerprint, store_generation
+                ) VALUES (?, 1, datetime('now'), ?, ?, ?, 1, ?, ?,
+                          (SELECT store_generation FROM search_index_state WHERE id = 1))
+                """,
+                values: [
+                    identity.moduleName,
+                    SearchIndexService.currentSchemaVersion,
+                    module.info.language,
+                    analyzer.identifier,
+                    identity.version,
+                    identity.fingerprint,
+                ]
+            )
+        }
+    }
+
+    /** Executes one bound fixture statement without interpreting module metadata as SQL. */
+    private func executeAgentSearchFixtureStatement(
+        database: OpaquePointer,
+        sql: String,
+        values: [Any]
+    ) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw agentSearchFixtureError(database: database, operation: "prepare")
+        }
+        defer { sqlite3_finalize(statement) }
+
+        for (offset, value) in values.enumerated() {
+            let index = Int32(offset + 1)
+            let result: Int32
+            switch value {
+            case let string as String:
+                result = sqlite3_bind_text(
+                    statement,
+                    index,
+                    string,
+                    -1,
+                    agentSearchFixtureSQLiteTransient
+                )
+            case let integer as Int:
+                result = sqlite3_bind_int64(statement, index, sqlite3_int64(integer))
+            default:
+                throw NSError(
+                    domain: "AgentSearchSourceIdentityFixture",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Unsupported SQLite fixture value"]
+                )
+            }
+            guard result == SQLITE_OK else {
+                throw agentSearchFixtureError(database: database, operation: "bind")
+            }
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw agentSearchFixtureError(database: database, operation: "execute")
+        }
+    }
+
+    /** Returns the current SQLite failure without hiding the fixture operation that failed. */
+    private func agentSearchFixtureError(database: OpaquePointer, operation: String) -> NSError {
+        let message = sqlite3_errmsg(database).map(String.init(cString:)) ?? "SQLite failure"
+        return NSError(
+            domain: "AgentSearchSourceIdentityFixture",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "SQLite \(operation) failed: \(message)"]
+        )
     }
 
     /**

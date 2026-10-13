@@ -121,7 +121,7 @@ struct GeneralBookBrowserView: View {
                                     accessibilityIdentifier: "generalBookBrowserRow::\(key)",
                                     action: { onSelectKey(key) }
                                 ) {
-                                    Text(key)
+                                    Text(displayName(for: key))
                                         .font(.system(size: 16))
                                         .lineLimit(1)
                                 }
@@ -145,7 +145,16 @@ struct GeneralBookBrowserView: View {
 
                 switch GenericSwordChooserResolver.resolve(result: result) {
                 case .present(let validKeys):
-                    allKeys = validKeys
+                    let presentableKeys = presentableKeys(from: validKeys)
+                    guard !presentableKeys.isEmpty else {
+                        isLoading = false
+                        if case .success(let rawKeys) = result {
+                            onEmptyKeys(rawKeys.first)
+                        }
+                        onBack()
+                        return
+                    }
+                    allKeys = presentableKeys
                     isLoading = false
                 case .dismissWithoutSelection:
                     isLoading = false
@@ -177,5 +186,31 @@ struct GeneralBookBrowserView: View {
                 }
             }
         }
+    }
+
+    /**
+     Projects Android's visible chooser label without changing the exact selected source key.
+
+     RawGenBook exposes JSword `TreeKey.name` as the leaf label while its full path remains the row
+     identity and selection payload. Other drivers retain their exact key text.
+     */
+    private func displayName(for key: String) -> String {
+        guard SwordJavaStringIdentity.equalsIgnoreCase(
+            module.info.moduleDriver,
+            "RawGenBook"
+        ) else { return key }
+        return AndroidJSwordGenBookKeyResolution.displayName(
+            forSourceKey: key,
+            sourceKeys: allKeys
+        )
+    }
+
+    /** Applies Android's visible-name filtering only to JSword TreeKey-backed modules. */
+    private func presentableKeys(from sourceKeys: [String]) -> [String] {
+        guard SwordJavaStringIdentity.equalsIgnoreCase(
+            module.info.moduleDriver,
+            "RawGenBook"
+        ) else { return sourceKeys }
+        return AndroidJSwordGenBookKeyResolution.presentableSourceKeys(sourceKeys)
     }
 }

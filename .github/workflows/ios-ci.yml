@@ -1239,7 +1239,7 @@ jobs:
 
   ios-simulator-ui-tests:
     name: ${{ matrix.job_name }}
-    runs-on: macos-15
+    runs-on: macos-26
     if: needs.repo-standards.outputs.required_checks_only != 'true'
     needs:
       - repo-standards
@@ -1286,7 +1286,10 @@ jobs:
 
       - name: Show Xcode version
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: xcodebuild -version
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -a
 
       - name: Ensure iOS simulator runtime is available
         if: needs.repo-standards.outputs.required_checks_only != 'true'
@@ -1298,13 +1301,95 @@ jobs:
             xcodebuild -downloadPlatform iOS
           fi
 
-      - name: Resolve iOS simulator destination
+      - name: Resolve pinned iOS simulator destination
         id: simulator
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: >-
-          python3 scripts/resolve_ios_simulator_destination.py
-          --create-dedicated-device
-          --device-name-prefix "AndBible CI UI"
+        env:
+          PINNED_SIMULATOR_RUNTIME_ID: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+          PINNED_SIMULATOR_RUNTIME_VERSION: "26.2"
+          PINNED_SIMULATOR_RUNTIME_BUILD: 23C54
+          PINNED_SIMULATOR_DEVICE_TYPE_ID: com.apple.CoreSimulator.SimDeviceType.iPhone-17
+          PINNED_SIMULATOR_DEVICE_NAME: iPhone 17
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          import uuid
+
+          sys.path.insert(0, "scripts")
+          from resolve_ios_simulator_destination import emit_selected_simulator
+
+          def simctl_json(*arguments: str) -> dict[str, object]:
+              """Read one simctl inventory as JSON for pinned simulator validation."""
+              result = subprocess.run(
+                  ["xcrun", "simctl", "list", *arguments, "-j"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              )
+              return json.loads(result.stdout)
+
+          runtime_identifier = os.environ["PINNED_SIMULATOR_RUNTIME_ID"]
+          runtime_version = os.environ["PINNED_SIMULATOR_RUNTIME_VERSION"]
+          runtime_build = os.environ["PINNED_SIMULATOR_RUNTIME_BUILD"]
+          runtimes = [
+              runtime
+              for runtime in simctl_json("runtimes", "available").get("runtimes", [])
+              if isinstance(runtime, dict) and runtime.get("identifier") == runtime_identifier
+          ]
+          if len(runtimes) != 1:
+              raise SystemExit(f"Expected one available pinned runtime {runtime_identifier}; found {len(runtimes)}")
+          runtime = runtimes[0]
+          actual_runtime = (
+              runtime.get("version"),
+              runtime.get("buildversion"),
+              runtime.get("isAvailable"),
+          )
+          expected_runtime = (runtime_version, runtime_build, True)
+          if actual_runtime != expected_runtime:
+              raise SystemExit(
+                  f"Pinned runtime metadata mismatch: expected {expected_runtime!r}, found {actual_runtime!r}"
+              )
+
+          device_type_identifier = os.environ["PINNED_SIMULATOR_DEVICE_TYPE_ID"]
+          device_name = os.environ["PINNED_SIMULATOR_DEVICE_NAME"]
+          device_types = [
+              device_type
+              for device_type in runtime.get("supportedDeviceTypes", [])
+              if isinstance(device_type, dict)
+              and device_type.get("identifier") == device_type_identifier
+              and device_type.get("name") == device_name
+          ]
+          if len(device_types) != 1:
+              raise SystemExit(
+                  f"Expected one pinned device type {device_type_identifier} named {device_name!r}; "
+                  f"found {len(device_types)}"
+              )
+
+          result = subprocess.run(
+              [
+                  "xcrun",
+                  "simctl",
+                  "create",
+                  f"AndBible CI UI {device_name}",
+                  device_type_identifier,
+                  runtime_identifier,
+              ],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          simulator_id = str(uuid.UUID(result.stdout.strip())).upper()
+          emit_selected_simulator(
+              os.environ["GITHUB_OUTPUT"],
+              device_name,
+              runtime_version,
+              simulator_id,
+              simulator_created=True,
+          )
+          PY
 
       - name: Require software keyboard for UI tests
         if: needs.repo-standards.outputs.required_checks_only != 'true'

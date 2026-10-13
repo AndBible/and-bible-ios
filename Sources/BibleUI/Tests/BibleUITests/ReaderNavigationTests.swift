@@ -3673,7 +3673,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let window = Window()
         let pageManager = PageManager(id: window.id)
         pageManager.bibleDocument = "KJV"
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 5
         window.pageManager = pageManager
@@ -3692,6 +3694,706 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             addDocumentsScript.contains("\"originalOrdinalRange\":null"),
             "Expected restored reading position to avoid verse highlighting. Script: \(addDocumentsScript)"
         )
+    }
+
+    /**
+     Restores canonical Android book identity independently from the module's filtered list index.
+
+     Psalms is module-list index 18 in a standard KJV list but JSword `BibleBook.ordinal()` 20.
+     Restoring Psalm 119 from ordinal 20 proves the explicit encoding marker controls identity and
+     that the complete active-module reference is validated before publication.
+     */
+    @MainActor
+    func testRestoreSavedPositionResolvesCanonicalBookOrdinalBeforeValidatingTuple() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let psalms = try XCTUnwrap(controller.bookList.first(where: { $0.osisId == "Ps" }))
+        XCTAssertNotEqual(
+            controller.bookList.firstIndex(where: { $0.osisId == "Ps" }),
+            JSwordBibleBook.ordinal(forOSIS: "Ps")
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Ps"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleChapterNo = 119
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentBook, psalms.name)
+        XCTAssertEqual(controller.currentChapter, 119)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertNotNil(
+            manager.module(named: "KJV")?.verseOrdinal(
+                osisBookId: "Ps",
+                chapter: 119,
+                verse: 1
+            )
+        )
+    }
+
+    /**
+     Preserves a saved Bible identity when the same module initials reopen with a changed catalog.
+
+     The first independent SWORD root exposes Genesis and Psalms, while the second exposes Genesis,
+     Esther, and Psalms under the same module initials. The ordinary navigation path writes Psalm
+     119 in the first controller, then the production pane-copy boundary transfers that state into
+     a fresh controller backed by the second root. The restored reference must remain Psalm 119 even
+     though Psalms moved from filtered-list index one to index two. This test intentionally uses only
+     baseline PageManager API so the same source demonstrates the old list-index failure.
+     */
+    @MainActor
+    func testSavedBiblePositionSurvivesFilteredModuleCatalogChange() throws {
+        let sourceModulePath = try makeTemporarySwordFixturePath()
+        let restoredModulePath = try makeTemporarySwordFixturePath()
+        let moduleInitials = "FilteredCanon"
+        let commonEntries = [
+            (
+                osisBookID: "Gen",
+                chapter: 1,
+                verse: 1,
+                text: #"<verse osisID="Gen.1.1">Synthetic Genesis.</verse>"#
+            ),
+            (
+                osisBookID: "Ps",
+                chapter: 1,
+                verse: 1,
+                text: #"<verse osisID="Ps.1.1">Synthetic Psalm one.</verse>"#
+            ),
+            (
+                osisBookID: "Ps",
+                chapter: 119,
+                verse: 1,
+                text: #"<verse osisID="Ps.119.1">Synthetic Psalm 119.</verse>"#
+            ),
+        ]
+        try seedSyntheticRawTextBibleModule(
+            named: moduleInitials,
+            description: "Filtered canon generation A",
+            versification: "KJV",
+            entries: commonEntries,
+            in: sourceModulePath
+        )
+        try seedSyntheticRawTextBibleModule(
+            named: moduleInitials,
+            description: "Filtered canon generation B",
+            versification: "KJV",
+            entries: commonEntries + [
+                (
+                    osisBookID: "Esth",
+                    chapter: 1,
+                    verse: 1,
+                    text: #"<verse osisID="Esth.1.1">Synthetic Esther.</verse>"#
+                ),
+            ],
+            in: restoredModulePath
+        )
+        let sourceManager = try XCTUnwrap(SwordManager(modulePath: sourceModulePath))
+        let restoredManager = try XCTUnwrap(SwordManager(modulePath: restoredModulePath))
+        let sourceModule = try XCTUnwrap(sourceManager.module(named: moduleInitials))
+        let restoredModule = try XCTUnwrap(restoredManager.module(named: moduleInitials))
+        let sourceBookIDs = sourceModule.getBookList().map(\.osisId)
+        let restoredBookIDs = restoredModule.getBookList().map(\.osisId)
+
+        XCTAssertEqual(sourceBookIDs, ["Gen", "Ps"])
+        XCTAssertEqual(restoredBookIDs, ["Gen", "Esth", "Ps"])
+        XCTAssertEqual(sourceBookIDs.firstIndex(of: "Ps"), 1)
+        XCTAssertEqual(restoredBookIDs.firstIndex(of: "Ps"), 2)
+
+        let sourceController = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: sourceManager
+        )
+        let sourceWindow = Window()
+        let sourcePageManager = PageManager(id: sourceWindow.id)
+        sourceWindow.pageManager = sourcePageManager
+        retainReaderWindowGraph(sourceWindow)
+        sourceController.activeWindow = sourceWindow
+        XCTAssertEqual(sourceController.switchBibleDocument(to: moduleInitials), .switched)
+        let sourcePsalms = try XCTUnwrap(
+            sourceController.bookList.first(where: { $0.osisId == "Ps" })
+        )
+        XCTAssertTrue(
+            sourceController.navigateTo(book: sourcePsalms.name, chapter: 119, verse: 1)
+        )
+
+        let restoredController = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: restoredManager
+        )
+        let restoredWindow = Window()
+        let restoredPageManager = PageManager(id: restoredWindow.id)
+        restoredPageManager.copyPersistedReaderState(from: sourcePageManager)
+        restoredWindow.pageManager = restoredPageManager
+        retainReaderWindowGraph(restoredWindow)
+        restoredController.activeWindow = restoredWindow
+
+        restoredController.restoreSavedPosition()
+
+        XCTAssertEqual(
+            restoredController.osisBookId(for: restoredController.currentBook),
+            "Ps"
+        )
+        XCTAssertEqual(restoredController.currentChapter, 119)
+        XCTAssertEqual(restoredController.currentVerse, 1)
+        XCTAssertEqual(restoredPageManager.bibleDocument, moduleInitials)
+    }
+
+    /**
+     Converts a marked saved coordinate from its persisted versification before module validation.
+
+     Vulgate Psalm 10:3 maps to a different KJV coordinate. The saved JSword book ordinal supplies
+     stable book identity, while `bibleVersification` supplies the chapter/verse domain. A failure
+     means restore relabels source coordinates as the active module's versification.
+     */
+    @MainActor
+    func testRestoreSavedPositionStrictlyMapsPersistedVersificationToActiveModule() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let expected = try XCTUnwrap(
+            VersificationMapper.convertStrictly(
+                osisBookId: "Ps",
+                chapter: 10,
+                verse: 3,
+                from: "Vulg",
+                to: "KJV"
+            )?.reference
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Ps"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "Vulg"
+        pageManager.bibleChapterNo = 10
+        pageManager.bibleVerseNo = 3
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), expected.osisBookId)
+        XCTAssertEqual(controller.currentChapter, expected.chapter)
+        XCTAssertEqual(controller.currentVerse, expected.verse)
+        XCTAssertNotNil(
+            manager.module(named: "KJV")?.verseOrdinal(
+                osisBookId: expected.osisBookId,
+                chapter: expected.chapter,
+                verse: expected.verse
+            )
+        )
+        XCTAssertEqual(pageManager.bibleVersification, "Vulg")
+        XCTAssertEqual(pageManager.bibleChapterNo, 10)
+        XCTAssertEqual(pageManager.bibleVerseNo, 3)
+    }
+
+    /**
+     Rejects a canonical but unaddressable saved tuple without guessing another Bible identity.
+
+     Esther's JSword ordinal is valid, while chapter 119 is not. Restore must retain the controller's
+     prior valid runtime position and preserve every raw persisted field so chooser recovery or a
+     later compatible reader can inspect the original data.
+     */
+    @MainActor
+    func testRestoreSavedPositionRejectsEsther119WithoutOverwritingPersistedHistory() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let passiveOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 5)
+        )
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        let estherOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Esth"))
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleBibleBook = estherOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleChapterNo = 119
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, estherOrdinal)
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleChapterNo, 119)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 0)
+
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            controller.committedRenderState.identity?.category == .bible
+        })
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: passiveOrdinal,
+            key: "Gen.2",
+            atChapterTop: false
+        )
+        XCTAssertEqual(pageManager.bibleBibleBook, estherOrdinal)
+        XCTAssertEqual(pageManager.bibleChapterNo, 119)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 0)
+
+        XCTAssertTrue(controller.navigateTo(book: "Genesis", chapter: 2, verse: 5))
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /** An unmarked filtered-list tuple resets atomically without consulting its old book integer. */
+    @MainActor
+    func testRestoreSavedPositionResetsUnmarkedEsther119ToAndroidDefault() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let estherIndex = try XCTUnwrap(
+            controller.bookList.firstIndex(where: { $0.osisId == "Esth" })
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleBibleBook = estherIndex
+        pageManager.bibleBookEncoding = nil
+        pageManager.bibleChapterNo = 119
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleDocument, "KJV")
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Resets an unmarked tuple before normal module fallback chooses an available Bible source.
+
+     The old Psalm list index belongs to an unavailable document. The reset never resolves that
+     integer through KJV's catalog and persists the fallback module with Android's Genesis default.
+     */
+    @MainActor
+    func testRestoreSavedPositionResetsUnmarkedPositionBeforeUnavailableModuleFallback() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let psalmsIndex = try XCTUnwrap(
+            controller.bookList.firstIndex(where: { $0.osisId == "Ps" })
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        XCTAssertTrue(controller.navigateTo(book: "Psalms", chapter: 23, verse: 1))
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Ps")
+        XCTAssertEqual(controller.currentChapter, 23)
+        XCTAssertEqual(controller.currentVerse, 1)
+
+        pageManager.bibleDocument = "UnavailableBible"
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleBibleBook = psalmsIndex
+        pageManager.bibleBookEncoding = nil
+        pageManager.bibleChapterNo = 119
+        pageManager.bibleVerseNo = 1
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleDocument, "KJV")
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Resets even an addressable unmarked row instead of guessing that its integer is a list index.
+
+     Psalm 119 is valid in this module, but an unmarked integer has no stable identity domain. The
+     reader must discard it exactly like an invalid legacy tuple and persist one canonical default.
+     */
+    @MainActor
+    func testRestoreSavedPositionDoesNotInterpretAddressableUnmarkedIndex() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let psalmsIndex = try XCTUnwrap(
+            controller.bookList.firstIndex(where: { $0.osisId == "Ps" })
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleBibleBook = psalmsIndex
+        pageManager.bibleBookEncoding = nil
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleChapterNo = 119
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Gen")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /** A fresh canonical default without a selected module adopts the normal Bible fallback. */
+    @MainActor
+    func testRestoreSavedPositionAdoptsDefaultModuleForFreshCanonicalPageManager() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let priorWindow = Window()
+        let priorPageManager = PageManager(id: priorWindow.id)
+        priorWindow.pageManager = priorPageManager
+        retainReaderWindowGraph(priorWindow)
+        controller.activeWindow = priorWindow
+        XCTAssertTrue(controller.navigateTo(book: "Psalms", chapter: 23, verse: 1))
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Ps")
+
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        XCTAssertNil(pageManager.bibleDocument)
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Ps")
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Gen")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleDocument, "KJV")
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /** A removed Bible's canonical coordinate restores through the readable selected fallback. */
+    @MainActor
+    func testRestoreSavedPositionMapsCanonicalCoordinateIntoReadableFallback() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "FallbackBible",
+            description: "Readable fallback Bible",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let settingsContext = ModelContext(try makeWorkspaceModelContainer())
+        let settingsStore = SettingsStore(modelContext: settingsContext)
+        settingsStore.setString("default-BIBLE", value: "FallbackBible")
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        controller.settingsStore = settingsStore
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        let psalmsOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Ps"))
+        pageManager.bibleDocument = "RemovedBible"
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleBibleBook = psalmsOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleChapterNo = 23
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.activeModuleName, "FallbackBible")
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Ps")
+        XCTAssertEqual(controller.currentChapter, 23)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleDocument, "FallbackBible")
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleBibleBook, psalmsOrdinal)
+        XCTAssertEqual(pageManager.bibleChapterNo, 23)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /** An unknown canonical versification preserves its tuple while document fallback persists. */
+    @MainActor
+    func testRestoreSavedPositionPreservesUnknownCanonicalVersificationAcrossPassiveScroll() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "FallbackBible",
+            description: "Readable fallback Bible",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "FallbackBible"))
+        let passiveOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 5)
+        )
+        let settingsContext = ModelContext(try makeWorkspaceModelContainer())
+        let settingsStore = SettingsStore(modelContext: settingsContext)
+        settingsStore.setString("default-BIBLE", value: "FallbackBible")
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager
+        )
+        controller.settingsStore = settingsStore
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        let psalmsOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Ps"))
+        pageManager.bibleDocument = "RemovedBible"
+        pageManager.bibleVersification = "FutureV11N"
+        pageManager.bibleBibleBook = psalmsOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleChapterNo = 119
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(controller.activeModuleName, "FallbackBible")
+        XCTAssertEqual(pageManager.bibleDocument, "FallbackBible")
+        XCTAssertEqual(pageManager.bibleVersification, "FutureV11N")
+        XCTAssertEqual(pageManager.bibleBibleBook, psalmsOrdinal)
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleChapterNo, 119)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            controller.committedRenderState.identity?.category == .bible
+        })
+        controller.navigatePrevious()
+        XCTAssertEqual(pageManager.bibleVersification, "FutureV11N")
+        XCTAssertEqual(pageManager.bibleBibleBook, psalmsOrdinal)
+        XCTAssertEqual(pageManager.bibleChapterNo, 119)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: passiveOrdinal,
+            key: "Gen.2",
+            atChapterTop: false
+        )
+
+        XCTAssertEqual(pageManager.bibleVersification, "FutureV11N")
+        XCTAssertEqual(pageManager.bibleBibleBook, psalmsOrdinal)
+        XCTAssertEqual(pageManager.bibleChapterNo, 119)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+
+        XCTAssertTrue(controller.navigateTo(book: "Genesis", chapter: 2, verse: 5))
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+        XCTAssertEqual(persistCount, 2)
+    }
+
+    /** Unknown encodings reset only Bible position fields and preserve auxiliary reader state. */
+    @MainActor
+    func testRestoreSavedPositionResetsUnknownEncodingWithoutClearingAuxiliaryState() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Ps"))
+        pageManager.bibleBookEncoding = "futureEncoding"
+        pageManager.bibleChapterNo = 119
+        pageManager.bibleVerseNo = 1
+        pageManager.commentaryAnchorOrdinal = 42
+        pageManager.dictionaryKey = "grace"
+        pageManager.generalBookKey = "/Westminster21/WCF/Ch 6"
+        pageManager.mapKey = "Jerusalem"
+        pageManager.jsState = #"{"memorize":{"mode":"scramble"}}"#
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Gen")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleDocument, "KJV")
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 42)
+        XCTAssertEqual(pageManager.dictionaryKey, "grace")
+        XCTAssertEqual(pageManager.generalBookKey, "/Westminster21/WCF/Ch 6")
+        XCTAssertEqual(pageManager.mapKey, "Jerusalem")
+        XCTAssertEqual(pageManager.jsState, #"{"memorize":{"mode":"scramble"}}"#)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /** A reset keeps Genesis 1:1 even when the selected partial Bible cannot render Genesis. */
+    @MainActor
+    func testRestoreSavedPositionDoesNotGuessAlternateBookForPartialBible() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let moduleInitials = "PsalmOnly"
+        try seedSyntheticRawTextBibleModule(
+            named: moduleInitials,
+            description: "Psalm-only reset fixture",
+            versification: "KJV",
+            entries: [
+                (
+                    osisBookID: "Ps",
+                    chapter: 1,
+                    verse: 1,
+                    text: #"<verse osisID="Ps.1.1">Synthetic Psalm.</verse>"#
+                ),
+            ],
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertEqual(manager.module(named: moduleInitials)?.getBookList().map(\.osisId), ["Ps"])
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        XCTAssertEqual(controller.switchBibleDocument(to: moduleInitials), .switched)
+        XCTAssertTrue(controller.navigateTo(book: "Psalms", chapter: 1, verse: 1))
+        XCTAssertEqual(controller.osisBookId(for: controller.currentBook), "Ps")
+
+        pageManager.bibleDocument = moduleInitials
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleBookEncoding = nil
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleDocument, moduleInitials)
+        XCTAssertEqual(pageManager.bibleVersification, "KJV")
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("emit('add_documents'") }
+        })
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents")
+                as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "error")
+        XCTAssertEqual(payload["errorMessage"] as? String, "No content for selected verse")
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
     }
 
     /**
@@ -4834,7 +5536,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let window = Window()
         let pageManager = PageManager(id: window.id)
         pageManager.bibleDocument = "KJV"
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         pageManager.textDisplaySettings = displaySettings
@@ -6676,6 +7380,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, "Genesis")
         XCTAssertEqual(controller.currentChapter, 1)
         XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(pageManager.bibleBibleBook, 2)
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleVersification, JSwordKJVAVersification.name)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
     }
@@ -6688,6 +7395,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      native reader to reverse-map that ordinal back to verse 5 before debouncing persistence. A
      failure means reader state is deriving verses from fixed 40-verse chapter math.
      */
+    @MainActor
     func testDidScrollToOrdinalDebouncesPersistenceWithinCurrentChapter() throws {
         let bridge = BibleBridge()
         let modulePath = try makeTemporarySwordFixturePath()
@@ -6701,6 +7409,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        commitBibleDocument(on: controller, bridge: bridge)
 
         let persisted = expectation(description: "Visible verse state persisted after debounce")
         var persistCount = 0
@@ -6728,6 +7437,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      key and expects iOS to update/persist the native chapter and verse from the ordinal. A failure
      means valid scroll telemetry can be dropped whenever `dataset.osisRef` is missing.
      */
+    @MainActor
     func testDidScrollToOrdinalPersistsVisibleVerseWhenKeyIsEmpty() throws {
         let bridge = BibleBridge()
         let modulePath = try makeTemporarySwordFixturePath()
@@ -6741,6 +7451,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        commitBibleDocument(on: controller, bridge: bridge)
 
         let persisted = expectation(description: "Visible verse state persisted after debounce")
         var persistCount = 0
@@ -6771,6 +7482,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      and uses the normal intra-chapter debounce path; a failure means source keys with verse suffixes
      can corrupt the pane chapter and send synchronized targets to the wrong location.
      */
+    @MainActor
     func testDidScrollToOrdinalParsesVerseQualifiedKeyAsChapter() throws {
         let bridge = BibleBridge()
         let modulePath = try makeTemporarySwordFixturePath()
@@ -6784,6 +7496,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        commitBibleDocument(on: controller, bridge: bridge)
 
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -6796,6 +7509,88 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentVerse, 5)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
+    }
+
+    /**
+     Keeps RawGenBook visible-position telemetry outside the durable Bible position contract.
+
+     The page key is the exact Westminster21 WCF chapter-six key emitted by the real module fixture.
+     The callback ordinal deliberately resolves to a different KJV verse, proving document-family
+     admission rather than claiming that this particular Westminster key produced the reported
+     invalid chapter. A failure means generic Vue scroll telemetry can still overwrite the hidden
+     Bible tuple that a later workspace restore will display.
+     */
+    @MainActor
+    func testWestminsterGeneralBookScrollDoesNotMutateBiblePosition() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let bibleModule = try XCTUnwrap(manager.module(named: "KJV"))
+        let bibleOrdinal = try XCTUnwrap(
+            bibleModule.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 5)
+        )
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let document = MyDocument(name: "Westminster Standards", initials: "Westminster21")
+        let page = MyDocumentPage(
+            title: "WCF Chapter 6",
+            pageKey: "/Westminster21/Westminster21/WCF/Ch 6",
+            contentType: .markdown
+        )
+        let content = MyDocumentPageContent(pageId: page.id, content: "WCF chapter six")
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        page.document = document
+        page.pageContent = content
+        try context.save()
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.myDocumentStore = MyDocumentStore(modelContext: context)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            controller.committedRenderState.identity?.category == .bible
+        })
+        XCTAssertTrue(
+            controller.loadMyDocumentPage(
+                bookInitials: document.initials,
+                pageKey: page.pageKey
+            )
+        )
+        XCTAssertTrue(waitForReaderCondition {
+            controller.committedRenderState.identity?.category == .generalBook
+                && controller.committedRenderState.identity?.key == page.pageKey
+        })
+        let originalBook = pageManager.bibleBibleBook
+        let originalEncoding = pageManager.bibleBookEncoding
+        let originalVersification = pageManager.bibleVersification
+        let originalChapter = pageManager.bibleChapterNo
+        let originalVerse = pageManager.bibleVerseNo
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: bibleOrdinal,
+            key: page.pageKey,
+            atChapterTop: false
+        )
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, originalBook)
+        XCTAssertEqual(pageManager.bibleBookEncoding, originalEncoding)
+        XCTAssertEqual(pageManager.bibleVersification, originalVersification)
+        XCTAssertEqual(pageManager.bibleChapterNo, originalChapter)
+        XCTAssertEqual(pageManager.bibleVerseNo, originalVerse)
+        XCTAssertEqual(persistCount, 0)
     }
 
     /**
@@ -6844,6 +7639,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(windowManager.registerController(targetController, for: targetWindow))
         sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         targetController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        commitBibleDocument(on: sourceController, bridge: sourceBridge)
+        commitBibleDocument(on: targetController, bridge: targetBridge)
         targetWindow.pageManager?.bibleBibleBook = nil
 
         let sourceBroadcast = expectation(description: "source scroll broadcasts once")
@@ -6869,7 +7666,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         targetController.scrollToOrdinal(ordinal)
 
-        XCTAssertEqual(targetWindow.pageManager?.bibleBibleBook, 0)
+        XCTAssertEqual(targetWindow.pageManager?.bibleBibleBook, 2)
+        XCTAssertEqual(
+            targetWindow.pageManager?.bibleBookEncoding,
+            PageManager.jswordBibleBookEncoding
+        )
 
         let reverseBroadcast = expectation(description: "target acknowledgement must not rebroadcast")
         reverseBroadcast.isInverted = true
@@ -7041,6 +7842,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.activeWindow = window
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 5)
+        commitBibleDocument(on: controller, bridge: bridge)
         let rebroadcast = expectation(description: "duplicate visible verse must not rebroadcast")
         rebroadcast.isInverted = true
         windowManager.onSyncVerseChanged = { _, _ in
@@ -7218,7 +8020,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.windowManagerRef = windowManager
         XCTAssertTrue(windowManager.registerController(controller, for: targetWindow))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
-        controller.bridgeDidSetClientReady(bridge)
+        commitBibleDocument(on: controller, bridge: bridge)
         emittedScripts.removeAll()
         controller.onInteraction = {
             self.retainReaderWindowGraph(targetWindow)
@@ -7347,7 +8149,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.windowManagerRef = windowManager
         XCTAssertTrue(windowManager.registerController(controller, for: targetWindow))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
-        controller.bridgeDidSetClientReady(bridge)
+        commitBibleDocument(on: controller, bridge: bridge)
+        bridge.javaScriptEvaluationObserver = nil
         controller.onInteraction = {
             self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
@@ -7425,6 +8228,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        commitBibleDocument(on: controller, bridge: bridge)
         controller.onInteraction = {
             self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
@@ -7625,7 +8429,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.windowManagerRef = windowManager
         XCTAssertTrue(windowManager.registerController(controller, for: scrolledWindow))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
-        controller.bridgeDidSetClientReady(bridge)
+        commitBibleDocument(on: controller, bridge: bridge)
         controller.onInteraction = {
             self.retainReaderWindowGraph(scrolledWindow)
             windowManager.activeWindow = scrolledWindow
@@ -7659,6 +8463,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      because SWORD's ordinal is not the legacy `45`; a failure means infinite-scroll persistence
      can store the wrong visible verse after a chapter boundary.
      */
+    @MainActor
     func testDidScrollToOrdinalPersistsImmediatelyWhenChapterChanges() throws {
         let bridge = BibleBridge()
         let modulePath = try makeTemporarySwordFixturePath()
@@ -7672,6 +8477,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        commitBibleDocument(on: controller, bridge: bridge)
 
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -7683,6 +8489,21 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentVerse, 5)
         XCTAssertEqual(pageManager.bibleChapterNo, 2)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
+    }
+
+    /** Commits one real Bible render before bridge telemetry is admitted by document family. */
+    @MainActor
+    private func commitBibleDocument(
+        on controller: BibleReaderController,
+        bridge: BibleBridge
+    ) {
+        if bridge.javaScriptEvaluationObserver == nil {
+            bridge.javaScriptEvaluationObserver = { _ in }
+        }
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            controller.committedRenderState.identity?.category == .bible
+        })
     }
 
     /**
@@ -7733,6 +8554,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         isShowingAndroidMultiDocument: Bool = false,
         acceptsLoadedScroll: Bool = false,
         onPersistState: (() -> Void)? = nil,
+        activeVersification: String = JSwordKJVAVersification.name,
         bookListOverride: [BibleReaderNavigationBook]? = nil
     ) -> BibleReaderNavigationContext {
         let books = bookListOverride ?? [
@@ -7756,6 +8578,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             },
             pageManager: { pageManager },
             bookList: { books },
+            activeVersification: { activeVersification },
             isShowingAndroidMultiDocument: { isShowingAndroidMultiDocument },
             clientReady: { clientReady },
             chapterCount: { book(named: $0)?.chapterCount ?? 0 },
@@ -7829,7 +8652,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         coordinator.navigateTo(book: "Exodus", chapter: 2, verse: 3, context: context)
 
         XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 3))
-        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 3)
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleVersification, JSwordKJVAVersification.name)
         XCTAssertEqual(pageManager.bibleChapterNo, 2)
         XCTAssertEqual(pageManager.bibleVerseNo, 3)
         XCTAssertEqual(state.history, ["Gen.1.1"])
@@ -7853,6 +8678,81 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
         coordinator.commitAcceptedContentRestore(originalOrdinalRange: [203, 203])
         XCTAssertNil(coordinator.originalNavigationOrdinalRange)
+    }
+
+    /**
+     Persists an extended-canon book with its full Android enum identity and active versification.
+
+     Psalm 151 is outside the KJVA table previously reused for book identity but belongs to JSword's
+     stable `BibleBook` enum. A failure means non-KJVA modules can still lose their book or be
+     mislabeled as KJVA even after the explicit encoding marker is present.
+     */
+    func testReaderNavigationCoordinatorPersistsExtendedCanonIdentityAndVersification() throws {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Psalm 151", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            activeVersification: "Synodal",
+            bookListOverride: [
+                BibleReaderNavigationBook(
+                    name: "Psalm 151",
+                    osisId: "Ps151",
+                    chapterCount: 1
+                )
+            ]
+        )
+
+        coordinator.navigateTo(book: "Psalm 151", chapter: 1, verse: 1, context: context)
+
+        XCTAssertEqual(
+            pageManager.bibleBibleBook,
+            try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Ps151"))
+        )
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(pageManager.bibleVersification, "Synodal")
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+    }
+
+    /** Rejects a synchronized book absent from the catalog before staging restore state. */
+    func testReaderNavigationCoordinatorRejectsUnknownSynchronizedBookAtomically() throws {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let original = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        let state = NavigationCoordinatorStateBox(position: original)
+        let pageManager = PageManager()
+        let genesisOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBibleBook = genesisOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        let context = makeNavigationCoordinatorContext(state: state, pageManager: pageManager)
+
+        coordinator.applySynchronizedVersePosition(
+            book: "Unknown",
+            chapter: 2,
+            verse: 5,
+            ordinal: 205,
+            context: context
+        )
+
+        XCTAssertEqual(state.position, original)
+        XCTAssertEqual(state.positionWriteCount, 0)
+        XCTAssertEqual(state.persistCount, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, genesisOrdinal)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        coordinator.prepareForContentReload()
+        XCTAssertEqual(
+            coordinator.consumeContentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .chapterTop
+        )
     }
 
     /**
@@ -7897,12 +8797,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      - Failure modes: Fails if stale proof changes position, PageManager state, history, persistence,
        loaded-range scroll, reload state, or explicit navigation ownership.
      */
-    func testReaderNavigationCoordinatorRejectsStaleIntroductionProofAtomically() {
+    func testReaderNavigationCoordinatorRejectsStaleIntroductionProofAtomically() throws {
         let coordinator = BibleReaderNavigationCoordinator()
         let original = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 5)
         let state = NavigationCoordinatorStateBox(position: original)
         let pageManager = PageManager()
-        pageManager.bibleBibleBook = 0
+        let genesisOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBibleBook = genesisOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 5
         let context = makeNavigationCoordinatorContext(
@@ -7925,7 +8827,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(state.persistCount, 0)
         XCTAssertEqual(state.loadCount, 0)
         XCTAssertTrue(state.loadedScrolls.isEmpty)
-        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, genesisOrdinal)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
         XCTAssertNil(coordinator.originalNavigationOrdinalRange)
@@ -7960,7 +8862,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         XCTAssertTrue(changed)
         XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 5))
-        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 3)
         XCTAssertEqual(pageManager.bibleChapterNo, 2)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
         XCTAssertEqual(state.persistCount, 1)
@@ -7971,6 +8873,43 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
                 ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
             ),
             .ordinal(205)
+        )
+    }
+
+    /** Rejects a visible key whose book is absent from the admitted active catalog. */
+    func testReaderNavigationCoordinatorRejectsUnknownVisibleBookBeforePublishingPosition() throws {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let original = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        let state = NavigationCoordinatorStateBox(position: original)
+        let pageManager = PageManager()
+        let genesisOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBibleBook = genesisOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        let context = makeNavigationCoordinatorContext(state: state, pageManager: pageManager)
+
+        let changed = coordinator.updateVisiblePosition(
+            ordinal: 205,
+            key: "Unknown.2",
+            atChapterTop: false,
+            context: context
+        )
+
+        XCTAssertFalse(changed)
+        XCTAssertEqual(state.position, original)
+        XCTAssertEqual(state.positionWriteCount, 0)
+        XCTAssertEqual(state.persistCount, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, genesisOrdinal)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        coordinator.prepareForContentReload()
+        XCTAssertEqual(
+            coordinator.consumeContentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .chapterTop
         )
     }
 
@@ -7994,6 +8933,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             setCurrentPosition: base.setCurrentPosition,
             pageManager: base.pageManager,
             bookList: base.bookList,
+            activeVersification: base.activeVersification,
             isShowingAndroidMultiDocument: base.isShowingAndroidMultiDocument,
             clientReady: base.clientReady,
             chapterCount: base.chapterCount,
@@ -8023,7 +8963,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         XCTAssertTrue(changed)
         XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 5))
-        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 3)
         XCTAssertEqual(pageManager.bibleChapterNo, 2)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
         XCTAssertEqual(state.persistCount, 1)
@@ -8049,7 +8989,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         modelContext.insert(pageManager)
         window.pageManager = pageManager
         pageManager.window = window
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = 2
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = JSwordKJVAVersification.name
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 5
         try modelContext.save()
@@ -8130,11 +9072,12 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Preserves a retained PageManager book index while the active book catalog is unavailable.
+     Rejects visible-position telemetry while the active book catalog is unavailable.
 
-     Same-chapter telemetry historically updated only the verse. A transient empty catalog must not
-     turn an exact callback into a destructive `nil` book-index write while chapter/verse handling
-     and the existing persistence debounce remain available.
+     The callback cannot establish an exact book identity without the active catalog. It must leave
+     the entire retained tuple unchanged and avoid scheduling persistence until that identity is
+     available again. The saved book and encoding sentinels deliberately do not claim to identify
+     the controller's Genesis position; they prove the callback does not reinterpret an opaque tuple.
      */
     @MainActor
     func testReaderNavigationCoordinatorPreservesBookIndexWhenCatalogIsUnavailable() {
@@ -8142,7 +9085,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let position = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 5)
         let state = NavigationCoordinatorStateBox(position: position)
         let pageManager = PageManager()
-        pageManager.bibleBibleBook = 1
+        let unavailableCatalogBookSentinel = 1
+        let unavailableCatalogEncodingSentinel = "test.unavailableCatalog"
+        pageManager.bibleBibleBook = unavailableCatalogBookSentinel
+        pageManager.bibleBookEncoding = unavailableCatalogEncodingSentinel
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 5
         let context = makeNavigationCoordinatorContext(
@@ -8160,10 +9106,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         XCTAssertFalse(changed)
         XCTAssertEqual(state.positionWriteCount, 0)
-        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, unavailableCatalogBookSentinel)
+        XCTAssertEqual(pageManager.bibleBookEncoding, unavailableCatalogEncodingSentinel)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
-        XCTAssertTrue(waitForReaderCondition(timeout: 1) { state.persistCount == 1 })
+        XCTAssertEqual(state.persistCount, 0)
     }
 
     /**
@@ -8196,7 +9143,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         XCTAssertFalse(changed)
         XCTAssertEqual(state.position, position)
-        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, 2)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
         XCTAssertTrue(waitForReaderCondition(timeout: 1) { state.persistCount == 1 })
@@ -8216,13 +9163,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      the same target already written to the PageManager instead of the chapter being left.
      */
     @MainActor
-    func testReaderNavigationCoordinatorImmediatePersistenceObservesPublishedPosition() {
+    func testReaderNavigationCoordinatorImmediatePersistenceObservesPublishedPosition() throws {
         let coordinator = BibleReaderNavigationCoordinator()
         let state = NavigationCoordinatorStateBox(
             position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
         )
         let pageManager = PageManager()
-        pageManager.bibleBibleBook = 0
+        let genesisOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBibleBook = genesisOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         var observedPosition: BibleReaderNavigationPosition?
@@ -8233,7 +9182,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             onPersistState: {
                 observedPosition = state.position
                 observedPageManagerPosition = BibleReaderNavigationPosition(
-                    book: pageManager.bibleBibleBook == 1 ? "Exodus" : "Genesis",
+                    book: pageManager.bibleBibleBook == 3 ? "Exodus" : "Genesis",
                     chapter: pageManager.bibleChapterNo ?? -1,
                     verse: pageManager.bibleVerseNo ?? -1
                 )

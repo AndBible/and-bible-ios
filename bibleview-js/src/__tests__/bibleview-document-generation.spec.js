@@ -50,9 +50,11 @@ async function flushDocumentWork() {
 describe("BibleView document generation", () => {
     let wrapper;
     let originalFontsDescriptor;
+    let originalElementFromPointDescriptor;
 
     beforeEach(() => {
         originalFontsDescriptor = Object.getOwnPropertyDescriptor(document, "fonts");
+        originalElementFromPointDescriptor = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
         window.bibleView = {};
         window.bibleViewDebug = {};
         vi.stubGlobal("scrollTo", vi.fn());
@@ -61,6 +63,10 @@ describe("BibleView document generation", () => {
         Object.defineProperty(document, "fonts", {
             configurable: true,
             value: {ready: Promise.resolve()},
+        });
+        Object.defineProperty(document, "elementFromPoint", {
+            configurable: true,
+            value: vi.fn(() => null),
         });
         vi.stubGlobal("android", new Proxy({}, {
             get(_target, property) {
@@ -79,6 +85,11 @@ describe("BibleView document generation", () => {
             Object.defineProperty(document, "fonts", originalFontsDescriptor);
         } else {
             delete document.fonts;
+        }
+        if (originalElementFromPointDescriptor) {
+            Object.defineProperty(document, "elementFromPoint", originalElementFromPointDescriptor);
+        } else {
+            delete document.elementFromPoint;
         }
         vi.unstubAllGlobals();
         vi.restoreAllMocks();

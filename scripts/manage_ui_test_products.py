@@ -38,6 +38,28 @@ SWORD_MODULE_PAYLOAD_FAMILIES = frozenset(
 CALVIN_SCENARIOS = frozenset(
     {"calvin-commentary-performance", "calvin-commentary-scroll-restoration"}
 )
+WESTMINSTER_SCENARIOS = frozenset(
+    {
+        "document-navigation-westminster-split",
+        "document-navigation-westminster-legacy-bible-position",
+    }
+)
+WESTMINSTER_ARCHIVE_URL = (
+    "https://www.crosswire.org/ftpmirror/pub/sword/packages/rawzip/Westminster21.zip"
+)
+WESTMINSTER_ARCHIVE_SHA256 = (
+    "87c3b890953fc969d443c7ac41f350d96309a5264c52a5c552e11d8b728348db"
+)
+WESTMINSTER_FIXTURE_ENTRIES = frozenset(
+    {
+        "mods.d/westminster21.conf",
+        "modules/genbook/rawgenbook/westminster21/.dat",
+        "modules/genbook/rawgenbook/westminster21/images/10000000000000D4000000171045E42024EE64EC.png",
+        "modules/genbook/rawgenbook/westminster21/westminster21.bdt",
+        "modules/genbook/rawgenbook/westminster21/westminster21.dat",
+        "modules/genbook/rawgenbook/westminster21/westminster21.idx",
+    }
+)
 SWORD_DERIVED_CACHE_RELATIVE_PATH = Path("mods.d/modules-conf.cache")
 XCTESTRUN_PATH_PLACEHOLDER_PATTERN = re.compile(r"__[A-Za-z][A-Za-z0-9_]*__")
 ALLOWED_ARCHIVE_ROOTS = frozenset({".derivedData", ".build", ".ui-test", MANIFEST_NAME})
@@ -452,6 +474,7 @@ def validate_required_products(
     fixture_manifest: Path,
     sword_fixture: Path,
     calvin_fixture: Path | None = None,
+    westminster_fixture: Path | None = None,
 ) -> Path:
     """Require the app, hosted/unit tests, UI products, fixture inputs, and xctestrun."""
     if not fixture_tool.is_file() or not os.access(fixture_tool, os.X_OK):
@@ -471,6 +494,8 @@ def validate_required_products(
     fixture_scenarios = read_fixture_scenarios(fixture_manifest)
     if CALVIN_SCENARIOS.intersection(fixture_scenarios.values()):
         validate_calvin_fixture(calvin_fixture or sword_fixture)
+    if WESTMINSTER_SCENARIOS.intersection(fixture_scenarios.values()):
+        validate_westminster_fixture(westminster_fixture or sword_fixture)
     xctestrun_path = discover_single_xctestrun(products_path)
     validate_app_excludes_bundled_sword_modules(
         required_app_bundle(products_path, xctestrun_path)
@@ -517,6 +542,47 @@ def validate_calvin_fixture(sword_fixture: Path) -> None:
             raise ProductArchiveError(f"Calvin SWORD fixture is missing or changed: {relative}")
 
 
+def validate_westminster_fixture(sword_fixture: Path) -> None:
+    """Require the reviewed freely distributable Westminster21 1.0.1 module."""
+    provenance_path = sword_fixture / "westminster21.provenance.json"
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProductArchiveError(f"Cannot read Westminster21 fixture provenance: {error}") from error
+    provenance_entries = provenance.get("entries")
+    if not isinstance(provenance_entries, dict):
+        raise ProductArchiveError("Westminster21 fixture provenance entries must be a dictionary.")
+    if (
+        provenance.get("format_version") != 1
+        or provenance.get("module") != "Westminster21"
+        or provenance.get("module_version") != "1.0.1"
+        or provenance.get("source_archive_url") != WESTMINSTER_ARCHIVE_URL
+        or provenance.get("source_archive_sha256") != WESTMINSTER_ARCHIVE_SHA256
+        or provenance.get("distribution_license") != "Copyrighted; Freely distributable"
+    ):
+        raise ProductArchiveError("Westminster21 fixture provenance does not match reviewed content.")
+    if set(provenance_entries) != WESTMINSTER_FIXTURE_ENTRIES:
+        raise ProductArchiveError("Westminster21 fixture provenance entry set is not exact.")
+    for relative, details in provenance_entries.items():
+        if not isinstance(details, dict):
+            raise ProductArchiveError(
+                f"Westminster21 fixture provenance entry is invalid: {relative}"
+            )
+        expected_size = details.get("bytes")
+        expected_hash = details.get("sha256")
+        path = sword_fixture / relative
+        if (
+            not isinstance(expected_size, int)
+            or not isinstance(expected_hash, str)
+            or not path.is_file()
+            or path.stat().st_size != expected_size
+            or sha256_file(path) != expected_hash
+        ):
+            raise ProductArchiveError(
+                f"Westminster21 SWORD fixture is missing or changed: {relative}"
+            )
+
+
 def validate_baseline_fixture_excludes_calvin(sword_fixture: Path) -> None:
     """Reject Calvin content in the shared KJV fixture used by package and Core tests."""
     forbidden = {"calvincommentaries.provenance.json", *CALVIN_FIXTURE_ENTRIES}
@@ -524,6 +590,17 @@ def validate_baseline_fixture_excludes_calvin(sword_fixture: Path) -> None:
     if present:
         raise ProductArchiveError(
             "Baseline SWORD fixture contains dedicated Calvin content: " + ", ".join(present)
+        )
+
+
+def validate_baseline_fixture_excludes_westminster(sword_fixture: Path) -> None:
+    """Reject Westminster21 content in the shared KJV fixture used by package and Core tests."""
+    forbidden = {"westminster21.provenance.json", *WESTMINSTER_FIXTURE_ENTRIES}
+    present = sorted(relative for relative in forbidden if (sword_fixture / relative).exists())
+    if present:
+        raise ProductArchiveError(
+            "Baseline SWORD fixture contains dedicated Westminster21 content: "
+            + ", ".join(present)
         )
 
 
@@ -553,6 +630,21 @@ def compose_sword_fixture(
         shutil.copy2(source, target, follow_symlinks=False)
 
 
+def add_westminster_fixture(westminster_fixture: Path, destination: Path) -> None:
+    """Add reviewed Westminster21 content to an existing isolated UI fixture root."""
+    provenance = westminster_fixture / "westminster21.provenance.json"
+    shutil.copy2(provenance, destination / provenance.name, follow_symlinks=False)
+    for relative in sorted(WESTMINSTER_FIXTURE_ENTRIES):
+        source = westminster_fixture / relative
+        target = destination / relative
+        if target.exists() or target.is_symlink():
+            raise ProductArchiveError(
+                f"Westminster21 fixture collides with composed SWORD content: {relative}"
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target, follow_symlinks=False)
+
+
 def _write_manifest(stage_root: Path, manifest: Mapping[str, object]) -> None:
     (stage_root / MANIFEST_NAME).write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -577,15 +669,19 @@ def package_products(
     """Stage the complete build products and write a self-verifying tar archive."""
     fixture_scenarios = read_fixture_scenarios(fixture_manifest)
     requires_calvin = bool(CALVIN_SCENARIOS.intersection(fixture_scenarios.values()))
+    requires_westminster = bool(WESTMINSTER_SCENARIOS.intersection(fixture_scenarios.values()))
+    westminster_fixture = fixture_manifest.parent / "westminster-sword"
     if requires_calvin and calvin_fixture is None:
         raise ProductArchiveError("Calvin UI scenarios require a dedicated Calvin fixture root.")
     validate_baseline_fixture_excludes_calvin(sword_fixture)
+    validate_baseline_fixture_excludes_westminster(sword_fixture)
     xctestrun_path = validate_required_products(
         products_path,
         fixture_tool,
         fixture_manifest,
         sword_fixture,
         calvin_fixture,
+        westminster_fixture if requires_westminster else None,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     stage_root = output_path.parent / "ui-test-products-stage"
@@ -616,6 +712,11 @@ def package_products(
     else:
         copy_baseline_sword_fixture(
             sword_fixture,
+            stage_root / SWORD_FIXTURE_RELATIVE_PATH,
+        )
+    if requires_westminster:
+        add_westminster_fixture(
+            westminster_fixture,
             stage_root / SWORD_FIXTURE_RELATIVE_PATH,
         )
 

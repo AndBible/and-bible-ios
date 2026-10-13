@@ -143,6 +143,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
         var bibleDocument: String?
         var bibleVersification: String?
         var bibleBook: Int?
+        var bibleBookEncoding: String? = PageManager.jswordBibleBookEncoding
         var bibleChapterNo: Int?
         var bibleVerseNo: Int?
         var commentaryDocument: String?
@@ -162,6 +163,16 @@ public final class RemoteSyncWorkspacePatchApplyService {
         var textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
         var jsState: String?
 
+        var biblePositionForAndroid: PageManagerBiblePosition {
+            PageManagerBiblePosition.canonicalOrAndroidDefault(
+                encoding: bibleBookEncoding,
+                versification: bibleVersification,
+                bookOrdinal: bibleBook,
+                chapter: bibleChapterNo,
+                verse: bibleVerseNo
+            )
+        }
+
         /**
          Converts one mutable working page-manager row into the restore snapshot shape.
 
@@ -170,13 +181,15 @@ public final class RemoteSyncWorkspacePatchApplyService {
          - Failure modes: This helper cannot fail.
          */
         func materializedValue() -> RemoteSyncAndroidWorkspacePageManager {
-            RemoteSyncAndroidWorkspacePageManager(
+            let biblePosition = biblePositionForAndroid
+            return RemoteSyncAndroidWorkspacePageManager(
                 windowID: windowID,
                 bibleDocument: bibleDocument,
-                bibleVersification: bibleVersification,
-                bibleBook: bibleBook,
-                bibleChapterNo: bibleChapterNo,
-                bibleVerseNo: bibleVerseNo,
+                bibleVersification: biblePosition.versification,
+                bibleBook: biblePosition.bookOrdinal,
+                bibleBookEncoding: PageManager.jswordBibleBookEncoding,
+                bibleChapterNo: biblePosition.chapter,
+                bibleVerseNo: biblePosition.verse,
                 commentaryDocument: commentaryDocument,
                 commentaryAnchorOrdinal: commentaryAnchorOrdinal,
                 commentarySourceBookAndKey: commentarySourceBookAndKey,
@@ -725,13 +738,15 @@ public final class RemoteSyncWorkspacePatchApplyService {
 
                 let pageManager = window.pageManager
                 let pageManagerFidelity = pageManagerFidelityByWindowID[window.id]
+                let biblePosition = pageManager?.biblePositionForAndroid ?? .androidDefault
                 pageManagersByWindowID[window.id] = WorkingPageManager(
                     windowID: window.id,
                     bibleDocument: pageManager?.bibleDocument,
-                    bibleVersification: pageManager?.bibleVersification,
-                    bibleBook: pageManager?.bibleBibleBook,
-                    bibleChapterNo: pageManager?.bibleChapterNo,
-                    bibleVerseNo: pageManager?.bibleVerseNo,
+                    bibleVersification: biblePosition.versification,
+                    bibleBook: biblePosition.bookOrdinal,
+                    bibleBookEncoding: PageManager.jswordBibleBookEncoding,
+                    bibleChapterNo: biblePosition.chapter,
+                    bibleVerseNo: biblePosition.verse,
                     commentaryDocument: pageManager?.commentaryDocument,
                     commentaryAnchorOrdinal: pageManager?.commentaryAnchorOrdinal,
                     commentarySourceBookAndKey: pageManagerFidelity?.commentarySourceBookAndKey,

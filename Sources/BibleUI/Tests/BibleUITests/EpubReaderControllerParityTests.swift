@@ -17,6 +17,92 @@ import XCTest
 @MainActor
 final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     /**
+     Verifies one active adapter safely completes overlapping immutable index reads.
+
+     Reader replacement can cancel an in-flight preparation only after its native SQLite call
+     returns, while the accepted preparation begins on another worker. Both operations therefore
+     share the active reader briefly and must receive complete source-owned results rather than
+     tripping SQLite's cross-thread connection guard.
+     */
+    func testConcurrentReadsOnOneEpubReaderReturnStableContent() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+
+        let results = await withTaskGroup(of: Bool.self) { group in
+            for worker in 0..<16 {
+                group.addTask {
+                    for _ in 0..<16 {
+                        let resultIsStable: Bool
+                        switch worker % 4 {
+                        case 0:
+                            resultIsStable = reader.content(forKey: "1")?.persistedKey == "1"
+                        case 1:
+                            resultIsStable = reader.firstKey() == "1#start"
+                        case 2:
+                            resultIsStable = reader.nextKey(after: "1") == "2"
+                        default:
+                            resultIsStable = reader.tableOfContents().map(\.key)
+                                == ["1#start", "2#target"]
+                        }
+                        guard resultIsStable else { return false }
+                    }
+                    return true
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+
+        XCTAssertEqual(results.count, 16)
+        XCTAssertTrue(results.allSatisfy { $0 })
+    }
+
+    /** The final EPUB page cannot borrow next navigation from the pane's hidden Bible state. */
+    func testLastEpubPageDisablesNextWithoutBibleFallback() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        window.pageManager?.bibleBibleBook = try XCTUnwrap(
+            JSwordBibleBook.ordinal(forOSIS: "Gen")
+        )
+        window.pageManager?.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        window.pageManager?.bibleVersification = "KJV"
+        window.pageManager?.bibleChapterNo = 9
+        window.pageManager?.bibleVerseNo = 1
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        controller.switchEpub(identifier: identifier)
+
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "2")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        XCTAssertEqual(controller.activeEpubIdentifier, identifier)
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertTrue(controller.hasPrevious)
+        XCTAssertFalse(controller.hasNext)
+        let navigationBoundary = scripts().count
+        controller.navigateNext()
+        XCTAssertEqual(scripts().count, navigationBoundary)
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookDocument, reader.initials)
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+        XCTAssertEqual(window.pageManager?.bibleChapterNo, 9)
+    }
+
+    /**
      Preserves Android startup admission when an EPUB and My Documents row share one initials token.
 
      - Setup: Installs a real EPUB, inserts a local My Documents page with the same initials/key,
