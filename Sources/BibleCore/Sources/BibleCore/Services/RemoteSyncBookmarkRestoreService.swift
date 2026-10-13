@@ -877,10 +877,12 @@ public final class RemoteSyncBookmarkRestoreService {
      - Parameter databaseURL: Local URL of the extracted Android bookmark backup database.
      - Returns: Typed snapshot of staged labels, bookmarks, and StudyPad rows.
      - Side effects:
-       - opens the staged SQLite database in read-only mode
+       - migrates the disposable staged database through Android Room v12 before reading it
      - Failure modes:
-       - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the file cannot be
-         opened as SQLite
+       - throws `RemoteSyncBookmarkDatabaseMigrationError` when the source version is unsupported,
+         the staged file cannot be opened, or an Android migration fails and rolls back
+       - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the migrated database
+         cannot be queried
        - throws `RemoteSyncBookmarkRestoreError.missingTable` when required Android tables are
          absent
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when Android UUID-like BLOB
@@ -889,6 +891,8 @@ public final class RemoteSyncBookmarkRestoreService {
          missing parent records or missing required StudyPad text rows
      */
     public func readSnapshot(from databaseURL: URL) throws -> RemoteSyncAndroidBookmarkSnapshot {
+        try RemoteSyncBookmarkDatabaseMigrator.migrateStagedDatabase(at: databaseURL)
+
         var db: OpaquePointer?
         guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             throw RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase

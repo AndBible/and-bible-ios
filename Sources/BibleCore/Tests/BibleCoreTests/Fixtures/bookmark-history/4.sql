@@ -1,0 +1,44 @@
+-- Android Room BookmarkDatabase/4.json; unmodified exported DDL.
+PRAGMA user_version = 4;
+CREATE TABLE IF NOT EXISTS `BibleBookmark` (`kjvOrdinalStart` INTEGER NOT NULL, `kjvOrdinalEnd` INTEGER NOT NULL, `ordinalStart` INTEGER NOT NULL, `ordinalEnd` INTEGER NOT NULL, `v11n` TEXT NOT NULL, `playbackSettings` TEXT, `id` BLOB NOT NULL, `createdAt` INTEGER NOT NULL, `book` TEXT, `startOffset` INTEGER, `endOffset` INTEGER, `primaryLabelId` BLOB DEFAULT NULL, `lastUpdatedOn` INTEGER NOT NULL DEFAULT 0, `wholeVerse` INTEGER NOT NULL DEFAULT 0, `type` TEXT DEFAULT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`primaryLabelId`) REFERENCES `Label`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL );
+CREATE INDEX IF NOT EXISTS `index_BibleBookmark_kjvOrdinalStart` ON `BibleBookmark` (`kjvOrdinalStart`);
+CREATE INDEX IF NOT EXISTS `index_BibleBookmark_kjvOrdinalEnd` ON `BibleBookmark` (`kjvOrdinalEnd`);
+CREATE INDEX IF NOT EXISTS `index_BibleBookmark_primaryLabelId` ON `BibleBookmark` (`primaryLabelId`);
+CREATE TABLE IF NOT EXISTS `BibleBookmarkNotes` (`bookmarkId` BLOB NOT NULL, `notes` TEXT NOT NULL, PRIMARY KEY(`bookmarkId`), FOREIGN KEY(`bookmarkId`) REFERENCES `BibleBookmark`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE );
+CREATE TABLE IF NOT EXISTS `BibleBookmarkToLabel` (`bookmarkId` BLOB NOT NULL, `labelId` BLOB NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT -1, `indentLevel` INTEGER NOT NULL DEFAULT 0, `expandContent` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`bookmarkId`, `labelId`), FOREIGN KEY(`bookmarkId`) REFERENCES `BibleBookmark`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`labelId`) REFERENCES `Label`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE );
+CREATE INDEX IF NOT EXISTS `index_BibleBookmarkToLabel_labelId` ON `BibleBookmarkToLabel` (`labelId`);
+CREATE TABLE IF NOT EXISTS `GenericBookmark` (`id` BLOB NOT NULL, `key` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `bookInitials` TEXT NOT NULL DEFAULT '', `ordinalStart` INTEGER NOT NULL, `ordinalEnd` INTEGER NOT NULL, `startOffset` INTEGER, `endOffset` INTEGER, `primaryLabelId` BLOB DEFAULT NULL, `lastUpdatedOn` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`), FOREIGN KEY(`primaryLabelId`) REFERENCES `Label`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL );
+CREATE INDEX IF NOT EXISTS `index_GenericBookmark_bookInitials_key` ON `GenericBookmark` (`bookInitials`, `key`);
+CREATE TABLE IF NOT EXISTS `GenericBookmarkNotes` (`bookmarkId` BLOB NOT NULL, `notes` TEXT NOT NULL, PRIMARY KEY(`bookmarkId`), FOREIGN KEY(`bookmarkId`) REFERENCES `GenericBookmark`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE );
+CREATE TABLE IF NOT EXISTS `GenericBookmarkToLabel` (`bookmarkId` BLOB NOT NULL, `labelId` BLOB NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT -1, `indentLevel` INTEGER NOT NULL DEFAULT 0, `expandContent` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`bookmarkId`, `labelId`), FOREIGN KEY(`bookmarkId`) REFERENCES `GenericBookmark`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`labelId`) REFERENCES `Label`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE );
+CREATE INDEX IF NOT EXISTS `index_GenericBookmarkToLabel_labelId` ON `GenericBookmarkToLabel` (`labelId`);
+CREATE TABLE IF NOT EXISTS `Label` (`id` BLOB NOT NULL, `name` TEXT NOT NULL, `color` INTEGER NOT NULL DEFAULT 0, `markerStyle` INTEGER NOT NULL DEFAULT 0, `markerStyleWholeVerse` INTEGER NOT NULL DEFAULT 0, `underlineStyle` INTEGER NOT NULL DEFAULT 0, `underlineStyleWholeVerse` INTEGER NOT NULL DEFAULT 0, `type` TEXT DEFAULT NULL, PRIMARY KEY(`id`));
+CREATE TABLE IF NOT EXISTS `StudyPadTextEntry` (`id` BLOB NOT NULL, `labelId` BLOB NOT NULL, `orderNumber` INTEGER NOT NULL, `indentLevel` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`labelId`) REFERENCES `Label`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE );
+CREATE INDEX IF NOT EXISTS `index_StudyPadTextEntry_labelId` ON `StudyPadTextEntry` (`labelId`);
+CREATE TABLE IF NOT EXISTS `StudyPadTextEntryText` (`studyPadTextEntryId` BLOB NOT NULL, `text` TEXT NOT NULL, PRIMARY KEY(`studyPadTextEntryId`), FOREIGN KEY(`studyPadTextEntryId`) REFERENCES `StudyPadTextEntry`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE );
+CREATE TABLE IF NOT EXISTS `LogEntry` (`tableName` TEXT NOT NULL, `entityId1` BLOB NOT NULL, `entityId2` BLOB NOT NULL, `type` TEXT NOT NULL, `lastUpdated` INTEGER NOT NULL DEFAULT 0, `sourceDevice` TEXT NOT NULL, PRIMARY KEY(`tableName`, `entityId1`, `entityId2`));
+CREATE INDEX IF NOT EXISTS `index_LogEntry_lastUpdated` ON `LogEntry` (`lastUpdated`);
+CREATE INDEX IF NOT EXISTS `index_LogEntry_sourceDevice` ON `LogEntry` (`sourceDevice`);
+CREATE TABLE IF NOT EXISTS `SyncConfiguration` (`keyName` TEXT NOT NULL, `stringValue` TEXT, `longValue` INTEGER, `booleanValue` INTEGER, PRIMARY KEY(`keyName`));
+CREATE TABLE IF NOT EXISTS `SyncStatus` (`sourceDevice` TEXT NOT NULL, `patchNumber` INTEGER NOT NULL, `sizeBytes` INTEGER NOT NULL, `appliedDate` INTEGER NOT NULL, PRIMARY KEY(`sourceDevice`, `patchNumber`));
+CREATE VIEW `BibleBookmarkWithNotes` AS SELECT b.*, bn.notes FROM BibleBookmark b LEFT OUTER JOIN BibleBookmarkNotes bn ON b.id = bn.bookmarkId;
+CREATE VIEW `GenericBookmarkWithNotes` AS SELECT b.*, bn.notes FROM GenericBookmark b LEFT OUTER JOIN GenericBookmarkNotes bn ON b.id = bn.bookmarkId;
+CREATE VIEW `StudyPadTextEntryWithText` AS SELECT e.*, t.text FROM StudyPadTextEntry e INNER JOIN StudyPadTextEntryText t ON e.id = t.studyPadTextEntryId;
+CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT);
+INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a1ac96e19e9bd3c655cdb5fa28517de0');
+
+-- Populated preservation fixture: literal UUIDs, text, offsets and StudyPad ordering.
+INSERT INTO Label(id,name,color) VALUES(X'10000000000000000000000000000001','Personal study',123);
+INSERT INTO Label(id,name,color) VALUES(X'20000000000000000000000000000001','__SPEAK_LABEL__',123);
+INSERT INTO Label(id,name,color) VALUES(X'20000000000000000000000000000002','__SPEAK_LABEL__',123);
+INSERT INTO BibleBookmark(id,kjvOrdinalStart,kjvOrdinalEnd,ordinalStart,ordinalEnd,v11n,createdAt,lastUpdatedOn,book,startOffset,endOffset,primaryLabelId,wholeVerse) VALUES(X'30000000000000000000000000000001',4,5,4,5,'KJVA',1700000000000,1700000001000,'KJV',2,8,X'20000000000000000000000000000001',0);
+INSERT INTO BibleBookmarkNotes(bookmarkId,notes) VALUES(X'30000000000000000000000000000001','My Bible note — preserved');
+INSERT INTO BibleBookmarkToLabel(bookmarkId,labelId,orderNumber,indentLevel,expandContent) VALUES(X'30000000000000000000000000000001',X'10000000000000000000000000000001',7,2,1);
+INSERT INTO BibleBookmarkToLabel(bookmarkId,labelId,orderNumber,indentLevel,expandContent) VALUES(X'30000000000000000000000000000001',X'20000000000000000000000000000001',8,2,1);
+INSERT INTO BibleBookmarkToLabel(bookmarkId,labelId,orderNumber,indentLevel,expandContent) VALUES(X'30000000000000000000000000000001',X'20000000000000000000000000000002',9,2,1);
+INSERT INTO StudyPadTextEntry(id,labelId,orderNumber,indentLevel) VALUES(X'50000000000000000000000000000001',X'20000000000000000000000000000002',12,3);
+INSERT INTO StudyPadTextEntryText(studyPadTextEntryId,text) VALUES(X'50000000000000000000000000000001','StudyPad text — preserved');
+INSERT INTO GenericBookmark(id,key,createdAt,lastUpdatedOn,bookInitials,ordinalStart,ordinalEnd,startOffset,endOffset,primaryLabelId) VALUES(X'40000000000000000000000000000001','/WCF/Ch 6',1700000000000,1700000001000,'Westminster21',2,4,1,9,X'20000000000000000000000000000002');
+INSERT INTO GenericBookmarkNotes(bookmarkId,notes) VALUES(X'40000000000000000000000000000001','My commentary note');
+INSERT INTO GenericBookmarkToLabel(bookmarkId,labelId,orderNumber,indentLevel,expandContent) VALUES(X'40000000000000000000000000000001',X'20000000000000000000000000000002',10,1,1);
+INSERT INTO LogEntry(tableName,entityId1,entityId2,type,lastUpdated,sourceDevice) VALUES('BibleBookmark',X'30000000000000000000000000000001','','UPSERT',1700000001000,'android');

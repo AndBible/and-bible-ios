@@ -327,6 +327,7 @@ func makeAndroidBookmarksDatabase(
         sqlite3_exec(
             db,
             """
+            PRAGMA user_version = 12;
             CREATE TABLE Label (
                 id BLOB NOT NULL PRIMARY KEY,
                 name TEXT NOT NULL,

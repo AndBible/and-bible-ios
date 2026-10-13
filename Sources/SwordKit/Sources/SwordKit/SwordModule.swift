@@ -430,6 +430,9 @@ public struct SwordRawDictionaryIndexSlot: Equatable, Sendable {
 public final class SwordModule: @unchecked Sendable {
     let handle: UnsafeMutableRawPointer
 
+    /// Retains the native allocation even after its manager facade and caches are released.
+    let nativeStorage: SwordNativeManagerStorage
+
     /// Installed SWORD root used for config-backed source-index inspection.
     private let moduleRootPath: String?
 
@@ -455,7 +458,8 @@ public final class SwordModule: @unchecked Sendable {
      Creates one native module wrapper from an already-resolved exact config when available.
 
      - Parameters:
-       - handle: Native module handle owned by the creating `SwordManager`.
+       - handle: Native module handle owned by `nativeStorage`.
+       - nativeStorage: Allocation owner retained for this wrapper's entire lifetime.
        - modulePath: Installed SWORD root used by later config-backed inspections.
        - parsedConfig: Config captured by the manager's one-pass registry enumeration. Passing it
          prevents a nested full-directory scan while preserving the exact metadata owner.
@@ -465,10 +469,12 @@ public final class SwordModule: @unchecked Sendable {
      */
     init(
         handle: UnsafeMutableRawPointer,
+        nativeStorage: SwordNativeManagerStorage,
         modulePath: String? = nil,
         parsedConfig: SwordModuleConfig? = nil
     ) {
         self.handle = handle
+        self.nativeStorage = nativeStorage
         self.moduleRootPath = modulePath
 
         self.info = SwordRuntime.sync {

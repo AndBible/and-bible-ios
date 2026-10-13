@@ -6,6 +6,37 @@ import SQLite3
 
 final class SwordManagerTests: XCTestCase {
     /**
+     A module handed to background work remains readable after its manager is released.
+
+     Verifies native key enumeration and content access after deterministic facade destruction,
+     then verifies both the module and shared native allocation are released without a cycle.
+     Creates only a temporary RawLD dictionary and removes it after all readers finish.
+     */
+    func testEscapedModuleRetainsNativeStorageWithoutRetainingManager() async throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            .init(initials: "LIFETIME", fullName: "Lifetime dictionary", abbreviation: nil,
+                  dataStem: "lifetime", entryText: "SURVIVES_MANAGER_RELEASE"),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var manager: SwordManager? = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        var module: SwordModule? = try XCTUnwrap(manager?.module(named: "LIFETIME"))
+        weak var releasedManager = manager
+        weak var releasedModule = module
+        weak var releasedStorage = module?.nativeStorage
+        manager = nil
+        XCTAssertNil(releasedManager, "Keeping a module must not retain the facade or its caches")
+        XCTAssertNotNil(releasedStorage)
+        let keys = try await Task.detached { [module] in
+            try XCTUnwrap(module).loadAllKeys()
+        }.value
+        XCTAssertEqual(keys, ["ENTRY"])
+        XCTAssertTrue(try XCTUnwrap(module).rawOSISFragment(forKey: "ENTRY").originalXML.contains("SURVIVES_MANAGER_RELEASE"))
+        module = nil
+        XCTAssertNil(releasedModule)
+        XCTAssertNil(releasedStorage, "The native allocation must be freed after its final reader")
+    }
+
+    /**
      Verifies the shared authority stays pinned to the Android current-stable version code.
 
      - Setup: Reads the public compatibility authority used by add-on admission and backup

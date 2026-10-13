@@ -1334,7 +1334,42 @@ class UITestFixtureService:
         self._prepared_scenario = request.scenario
         return response
 
+    def _app_is_running(self, deadline: float) -> bool:
+        """Read the simulator launchd job table before requesting app termination.
+
+        The fixture host exclusively owns launch/reset sequencing. A missing job or a job
+        without a PID proves there is no current app process to stop. Query failures and
+        malformed output fail closed before any fixture mutation; they never mean stopped.
+        This avoids simctl terminate's slow lookup for an absent application.
+        """
+        result = self._run(
+            ["/usr/bin/xcrun", "simctl", "spawn", self.configuration.simulator_id,
+             "launchctl", "list"],
+            deadline,
+            self.configuration.request_timeout_seconds,
+            "simulator app process lookup",
+        )
+        if result.returncode != 0:
+            raise FixtureServiceError(self._command_failure("simulator app process lookup", result))
+        lines = result.stdout.strip().splitlines()
+        if not lines or lines[0].split() != ["PID", "Status", "Label"]:
+            raise FixtureServiceError("simulator app process lookup returned an invalid job table")
+        running = False
+        prefix = f"UIKitApplication:{self.configuration.bundle_identifier}["
+        for line in lines[1:]:
+            fields = line.split()
+            if (len(fields) != 3 or (fields[0] != "-" and not fields[0].isdigit())
+                    or not fields[1].lstrip("-").isdigit()):
+                raise FixtureServiceError("simulator app process lookup returned an invalid job row")
+            pid, _, label = fields
+            if label.startswith(prefix) and pid != "-":
+                running = True
+        return running
+
     def _terminate_app(self, deadline: float) -> None:
+        """Stop a proven running app before mutation; retain the original request deadline."""
+        if not self._app_is_running(deadline):
+            return
         try:
             result = self._run(
                 [
