@@ -196,8 +196,10 @@ enum RemoteSyncBookmarkDatabaseMigrator {
         }
     }
 
-    /// Mirrors Android 11→12: canonical rows win collisions; all references move before deletion.
-    /// AI labels are deliberately excluded because Android migrates only these three names.
+    /**
+     Mirrors Android 11→12: canonical rows win collisions; all references move before deletion.
+     AI labels are deliberately excluded because Android migrates only these three names.
+     */
     private static func specialLabelStatements() -> [String] {
         let labels = [
             ("__SPEAK_LABEL__", "000000000000ab1e00005bea400001a1"),

@@ -3,8 +3,10 @@ import SwiftData
 import SQLite3
 @testable import BibleCore
 
-/// Exercises real historical Room layouts through the manual restore/import boundary and re-export.
-/// Literal fixture contents make missing notes, label relationships, or StudyPad ordering observable.
+/**
+ Exercises real historical Room layouts through the manual restore/import boundary and re-export.
+ Literal fixture contents make missing notes, label relationships, or StudyPad ordering observable.
+ */
 @MainActor
 final class AndroidBookmarkMigrationTests: XCTestCase {
     private let bibleID = UUID(uuidString: "30000000-0000-0000-0000-000000000001")!
