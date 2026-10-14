@@ -1,8 +1,8 @@
 # Releasing a new version
 
 End-to-end checklist for shipping an App Store update, from a release branch to
-the "Release this version" button. It links to the focused guides for the
-details of each tool:
+the "Release this version" button and the release tag. It links to the
+focused guides for the details of each tool:
 
 - [TestFlight CLI upload](testflight-cli-upload.md) — `make testflight` and its
   one-time signing and API-key setup
@@ -32,8 +32,9 @@ contributors land fixes through pull requests.
 ## 1. Decide the version
 
 Semantic version `MAJOR.MINOR.PATCH`. A bug-fix release increments the last
-number. There is no version tooling and no git tag convention; the marketing
-version lives in one place.
+number. There is no version tooling; the marketing version lives in one place,
+and each shipped version gets a `v<version>` git tag (step 12). `git tag -l 'v*'`
+shows what has shipped.
 
 ## 2. Create the release branch
 
@@ -96,6 +97,9 @@ branch. It ends with `Upload succeeded` and `>> Done`. Afterwards
 Store Connect → TestFlight after a few minutes of processing; the internal
 group receives it automatically.
 
+Write down the build number (`>> Archiving (build …)` in the output) and the
+commit it was archived from (`git rev-parse HEAD`). Step 12 tags that commit.
+
 If the build changes after upload (more fixes land), merge them, re-run the
 tests, and upload a new build with the same marketing version. Build numbers
 are timestamps, so a re-upload always gets a fresh one.
@@ -149,6 +153,22 @@ once more, then press **Release This Version**. Updates can use Phased Release
 
 If a serious bug shows up while waiting, abandon the build for free: fix it,
 bump the marketing version again (step 3) and start over from step 6.
+
+## 12. Tag the release
+
+Once the version is released, tag the commit the shipped build was archived
+from (step 6) with an annotated `v<version>` tag that records the build number,
+and push the tag:
+
+```bash
+git tag -a v<version> <commit> -m "AndBible iOS <version> (build <build-number>)"
+git push origin v<version>
+```
+
+Tag only what actually reached the App Store: a build that was rejected or
+abandoned gets no tag. Tags are pushed directly; they do not go through a pull
+request. If the release branch was merged with a merge commit, the tagged commit
+is still part of `main`'s history.
 
 ## Troubleshooting
 

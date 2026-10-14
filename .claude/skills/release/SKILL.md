@@ -50,10 +50,14 @@ duplicate the steps here — if a step is wrong or missing, fix the howto.
 - After `make appstore-metadata`, revert `appstore/android_source.lock` unless
   the user asked to move the Android pin.
 - After `make testflight`, check that `git status` is clean (the build number
-  stamp must have been restored).
+  stamp must have been restored), and record the build number and
+  `git rev-parse HEAD` in the todo list — the release tag needs both.
+- **Tag only after the user confirms the version is released** in App Store
+  Connect, never at upload or submission. Ask before pushing the tag.
 
 ## Finishing
 
 When the user has submitted for review, summarise the state: version, build
-number, PR, and which steps remain (verify from TestFlight, then Release). If
+number, commit, PR, and which steps remain (verify from TestFlight, Release,
+then the `v<version>` tag on the recorded commit). If
 `.local/release-handover.md` exists, offer to update it.
