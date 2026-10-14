@@ -1,4 +1,5 @@
 Denne opdatering indeholder fejlrettelser:
-- Kapitler, du læser, registreres nu pålideligt i din læsefremgang.
-- Valgmulighederne i menuen for bogmærker og fremgang forbliver nu synlige.
-- Bedøm og anmeld åbner nu appens side i App Store.
+- Ældre sikkerhedskopier af bogmærker gendannes nu korrekt.
+- Rettet gemte læsepositioner, der kunne åbne den forkerte bog eller det forkerte kapitel.
+- Navigation mellem kapitler og bøger er mere pålidelig.
+- Rettet sjældne nedbrud under læsning af bøger og EPUB-dokumenter.

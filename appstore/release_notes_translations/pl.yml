@@ -1,6 +1,7 @@
-source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+source_sha: 7e8aab8ce13ebb6108b1963e405b64c4e418298b87707d750468bb98ad45c6e9
 release_notes: |-
   Ta aktualizacja zawiera poprawki błędów:
-  - Przeczytane rozdziały są teraz niezawodnie zapisywane w postępie czytania.
-  - Opcje w menu zakładek i postępu pozostają teraz widoczne.
-  - Opcja Oceń i napisz recenzję otwiera teraz stronę aplikacji w App Store.
+  - Starsze kopie zapasowe zakładek są teraz poprawnie przywracane.
+  - Naprawiono zapisane pozycje czytania, które mogły otwierać niewłaściwą księgę lub rozdział.
+  - Przechodzenie między rozdziałami i księgami jest bardziej niezawodne.
+  - Naprawiono rzadkie awarie podczas czytania książek i dokumentów EPUB.

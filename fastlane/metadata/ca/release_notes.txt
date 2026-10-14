@@ -1,4 +1,5 @@
-Aquesta actualització conté correccions d'errors:
-- Els capítols que llegeixes ara es registren de manera fiable al progrés de lectura.
-- Les opcions del menú de marcadors i progrés ara continuen visibles.
-- «Valora i opina» ara obre la pàgina de l'aplicació a l'App Store.
+Aquesta actualització inclou correccions d'errors:
+- Les còpies de seguretat antigues de marcadors ara es restauren correctament.
+- S'han corregit les posicions de lectura desades que podien obrir un llibre o un capítol equivocat.
+- La navegació entre capítols i llibres és més fiable.
+- S'han corregit tancaments inesperats poc habituals en llegir llibres i documents EPUB.

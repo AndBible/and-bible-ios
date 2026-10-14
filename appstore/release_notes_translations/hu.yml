@@ -1,6 +1,7 @@
-source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+source_sha: 7e8aab8ce13ebb6108b1963e405b64c4e418298b87707d750468bb98ad45c6e9
 release_notes: |-
   Ez a frissítés hibajavításokat tartalmaz:
-  - Az elolvasott fejezetek mostantól megbízhatóan rögzítésre kerülnek az olvasási haladásban.
-  - A könyvjelző- és haladásmenü lehetőségei mostantól látszanak.
-  - Az Értékelés és vélemény mostantól megnyitja az alkalmazás App Store-oldalát.
+  - A régebbi könyvjelző-biztonsági mentések mostantól helyesen állíthatók vissza.
+  - Javítva a mentett olvasási pozíciók, amelyek rossz könyvet vagy fejezetet nyithattak meg.
+  - A fejezetek és könyvek közötti navigáció megbízhatóbb.
+  - Javítva ritka összeomlások könyvek és EPUB-dokumentumok olvasásakor.

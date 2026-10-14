@@ -1,4 +1,5 @@
-Questo aggiornamento contiene correzioni di bug:
-- I capitoli che leggi ora vengono registrati in modo affidabile nei progressi di lettura.
-- Le opzioni del menu dei segnalibri e dei progressi ora restano visibili.
-- «Valuta e recensisci» ora apre la pagina dell'app sull'App Store.
+Questo aggiornamento include correzioni di bug:
+- I vecchi backup dei segnalibri ora vengono ripristinati correttamente.
+- Corrette le posizioni di lettura salvate che potevano aprire il libro o il capitolo sbagliato.
+- La navigazione tra capitoli e libri è più affidabile.
+- Corretti rari arresti anomali durante la lettura di libri e documenti EPUB.
