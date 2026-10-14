@@ -1,6 +1,7 @@
-source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+source_sha: 7e8aab8ce13ebb6108b1963e405b64c4e418298b87707d750468bb98ad45c6e9
 release_notes: |-
   Deze update bevat bugfixes:
-  - Hoofdstukken die je leest worden nu betrouwbaar vastgelegd in je leesvoortgang.
-  - De keuzes in het menu voor bladwijzers en voortgang blijven nu zichtbaar.
-  - Beoordeel en schrijf een recensie opent nu de App Store-pagina van de app.
+  - Oudere back-ups van bladwijzers worden nu correct hersteld.
+  - Opgeslagen leesposities opgelost die het verkeerde boek of hoofdstuk konden openen.
+  - Navigeren tussen hoofdstukken en boeken is betrouwbaarder.
+  - Zeldzame crashes opgelost bij het lezen van boeken en EPUB-documenten.

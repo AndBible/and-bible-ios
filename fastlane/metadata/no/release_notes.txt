@@ -1,4 +1,5 @@
 Denne oppdateringen inneholder feilrettinger:
-- Kapitler du leser registreres nå pålitelig i leseframdriften din.
-- Valgene i menyen for bokmerker og framdrift forblir nå synlige.
-- Vurder og skriv anmeldelse åpner nå appens side i App Store.
+- Eldre sikkerhetskopier av bokmerker gjenopprettes nå riktig.
+- Rettet lagrede leseposisjoner som kunne åpne feil bok eller kapittel.
+- Navigering mellom kapitler og bøker er mer pålitelig.
+- Rettet sjeldne krasj under lesing av bøker og EPUB-dokumenter.

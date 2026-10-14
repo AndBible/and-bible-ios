@@ -1,6 +1,7 @@
-source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+source_sha: 7e8aab8ce13ebb6108b1963e405b64c4e418298b87707d750468bb98ad45c6e9
 release_notes: |-
   Esta actualización incluye correcciones de errores:
-  - Los capítulos que lees ahora se registran de forma fiable en tu progreso de lectura.
-  - Las opciones del menú de marcadores y progreso ahora permanecen visibles.
-  - «Valorar y reseñar» ahora abre la página de la app en la App Store.
+  - Las copias de seguridad antiguas de marcadores ahora se restauran correctamente.
+  - Se han corregido posiciones de lectura guardadas que podían abrir un libro o capítulo equivocado.
+  - La navegación entre capítulos y libros es más fiable.
+  - Se han corregido cierres inesperados poco frecuentes al leer libros y documentos EPUB.

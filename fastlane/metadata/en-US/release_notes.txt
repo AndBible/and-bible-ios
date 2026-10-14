@@ -1,4 +1,5 @@
 This update contains bug fixes:
-- Chapters you read are now recorded reliably in your reading progress.
-- The bookmark and progress menu choices now stay visible.
-- Rate & Review now opens the app's App Store page.
+- Older bookmark backups now restore correctly.
+- Fixed saved reading positions that could open the wrong book or chapter.
+- Navigating between chapters and books is more reliable.
+- Fixed rare crashes while reading books and EPUB documents.

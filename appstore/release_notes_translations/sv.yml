@@ -1,6 +1,7 @@
-source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+source_sha: 7e8aab8ce13ebb6108b1963e405b64c4e418298b87707d750468bb98ad45c6e9
 release_notes: |-
   Den här uppdateringen innehåller felrättningar:
-  - Kapitel du läser registreras nu pålitligt i din läsframsteg.
-  - Valen i menyn för bokmärken och framsteg förblir nu synliga.
-  - Betygsätt och recensera öppnar nu appens sida i App Store.
+  - Äldre säkerhetskopior av bokmärken återställs nu korrekt.
+  - Åtgärdade sparade läspositioner som kunde öppna fel bok eller kapitel.
+  - Navigering mellan kapitel och böcker är pålitligare.
+  - Åtgärdade sällsynta krascher vid läsning av böcker och EPUB-dokument.

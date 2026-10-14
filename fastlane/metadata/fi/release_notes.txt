@@ -1,4 +1,5 @@
 Tämä päivitys sisältää virhekorjauksia:
-- Lukemasi luvut tallentuvat nyt luotettavasti lukuedistymiseesi.
-- Kirjanmerkki- ja edistymisvalikon valinnat pysyvät nyt näkyvissä.
-- Arvostele ja kirjoita arvostelu avaa nyt sovelluksen App Store -sivun.
+- Vanhat kirjanmerkkivarmuuskopiot palautuvat nyt oikein.
+- Korjattu tallennetut lukukohdat, jotka saattoivat avata väärän kirjan tai luvun.
+- Siirtyminen lukujen ja kirjojen välillä on luotettavampaa.
+- Korjattu harvinaisia kaatumisia kirjoja ja EPUB-asiakirjoja luettaessa.

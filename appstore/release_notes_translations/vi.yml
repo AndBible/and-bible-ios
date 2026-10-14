@@ -1,6 +1,7 @@
-source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+source_sha: 7e8aab8ce13ebb6108b1963e405b64c4e418298b87707d750468bb98ad45c6e9
 release_notes: |-
   Bản cập nhật này có các bản sửa lỗi:
-  - Các chương bạn đọc giờ được ghi lại đáng tin cậy vào tiến độ đọc của bạn.
-  - Các lựa chọn trong menu dấu trang và tiến độ giờ luôn hiển thị.
-  - Đánh giá & Nhận xét giờ mở trang ứng dụng trên App Store.
+  - Các bản sao lưu dấu trang cũ giờ được khôi phục chính xác.
+  - Đã sửa các vị trí đọc đã lưu có thể mở nhầm sách hoặc chương.
+  - Việc chuyển giữa các chương và sách đáng tin cậy hơn.
+  - Đã sửa các lỗi treo ứng dụng hiếm gặp khi đọc sách và tài liệu EPUB.

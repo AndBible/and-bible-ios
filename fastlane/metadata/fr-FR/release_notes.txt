@@ -1,4 +1,5 @@
-Cette mise à jour apporte des corrections de bugs :
-- Les chapitres que vous lisez sont désormais enregistrés de façon fiable dans votre progression de lecture.
-- Les choix du menu des signets et de la progression restent désormais visibles.
-- « Noter et donner un avis » ouvre désormais la page de l'app sur l'App Store.
+Cette mise à jour contient des corrections de bugs :
+- Les anciennes sauvegardes de signets sont désormais restaurées correctement.
+- Correction des positions de lecture enregistrées qui pouvaient ouvrir le mauvais livre ou chapitre.
+- La navigation entre les chapitres et les livres est plus fiable.
+- Correction de plantages rares lors de la lecture de livres et de documents EPUB.
