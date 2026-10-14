@@ -303,6 +303,12 @@ generated and must never be hand-edited. Screenshots are uploaded by hand and
 `deliver` is configured not to touch them. See
 `docs/howto/appstore-metadata.md`.
 
+### Shipping a release
+
+The end-to-end procedure (version bump, What's New, TestFlight, `deliver`,
+review, release) is `docs/howto/releasing.md`. When driving a release, use the
+`release` skill (`.claude/skills/release/SKILL.md`).
+
 ## Troubleshooting
 
 ### Xcode / Package Resolution
