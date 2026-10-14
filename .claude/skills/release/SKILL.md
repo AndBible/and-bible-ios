@@ -52,12 +52,13 @@ duplicate the steps here — if a step is wrong or missing, fix the howto.
 - After `make testflight`, check that `git status` is clean (the build number
   stamp must have been restored), and record the build number and
   `git rev-parse HEAD` in the todo list — the release tag needs both.
-- **Tag only after the user confirms the version is released** in App Store
-  Connect, never at upload or submission. Ask before pushing the tag.
+- **Tag when the user confirms the submission for review succeeded**, not at
+  upload. If review rejects the build and another one is submitted, move the
+  tag (step 11 of the howto). Ask before pushing or moving a tag.
 
 ## Finishing
 
 When the user has submitted for review, summarise the state: version, build
-number, commit, PR, and which steps remain (verify from TestFlight, Release,
-then the `v<version>` tag on the recorded commit). If
+number, commit, PR, and which steps remain (the `v<version>` tag on the
+recorded commit if not yet pushed, verify from TestFlight, then Release). If
 `.local/release-handover.md` exists, offer to update it.

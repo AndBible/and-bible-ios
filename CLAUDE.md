@@ -306,7 +306,7 @@ generated and must never be hand-edited. Screenshots are uploaded by hand and
 ### Shipping a release
 
 The end-to-end procedure (version bump, What's New, TestFlight, `deliver`,
-review, release, tag) is `docs/howto/releasing.md`. When driving a release, use
+review, tag, release) is `docs/howto/releasing.md`. When driving a release, use
 the `release` skill (`.claude/skills/release/SKILL.md`).
 
 ## Troubleshooting
