@@ -45,7 +45,7 @@ struct BibleReaderAnnotationBridgeCoordinator {
     /// Current reader book name used by bookmark creation.
     private let currentBook: String
     /// Resolves exact source coordinates into a typed, verified KJVA persistence contract.
-    private let verifiedKJVAOrdinalRange: (String, Int, Int) -> VerifiedKJVAOrdinalRange?
+    private let verifiedKJVAOrdinalRange: (String, Int, Int) -> (any BibleBookmarkOrdinalRange)?
     /// Active notes content type supplier for note and StudyPad journal creation.
     private let currentNotesContentType: () -> String
     /// Current workspace settings supplier for auto-label and cursor mutations.
@@ -92,7 +92,7 @@ struct BibleReaderAnnotationBridgeCoordinator {
         bookmarkService: BookmarkService,
         payloadFactory: BibleReaderAnnotationPayloadFactory,
         currentBook: String,
-        verifiedKJVAOrdinalRange: @escaping (String, Int, Int) -> VerifiedKJVAOrdinalRange?,
+        verifiedKJVAOrdinalRange: @escaping (String, Int, Int) -> (any BibleBookmarkOrdinalRange)?,
         currentNotesContentType: @escaping () -> String,
         workspaceSettings: @escaping () -> WorkspaceSettings?,
         setWorkspaceSettings: @escaping (WorkspaceSettings) -> Void,

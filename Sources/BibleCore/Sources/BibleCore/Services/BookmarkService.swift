@@ -475,7 +475,7 @@ public final class BookmarkService {
     // MARK: - Bible Bookmarks
 
     /**
-     Creates a new Bible bookmark from an explicitly verified source-to-KJVA mapping.
+     Creates a new Bible bookmark from an validated source range and Android lookup projection.
 
      - Parameters:
        - ordinalRange: Typed boundary containing exact source coordinates and their validated KJVA
@@ -492,7 +492,7 @@ public final class BookmarkService {
      */
     @discardableResult
     public func addBibleBookmark(
-        ordinalRange: VerifiedKJVAOrdinalRange,
+        ordinalRange: any BibleBookmarkOrdinalRange,
         wholeVerse: Bool = true,
         startOffset: Int? = nil,
         endOffset: Int? = nil,
@@ -515,7 +515,7 @@ public final class BookmarkService {
     }
 
     /**
-     Updates one explicitly identified Bible bookmark from a verified source-to-KJVA mapping.
+     Updates one explicitly identified Bible bookmark from a validated source range and Android lookup projection.
 
      - Parameters:
        - id: Stable bookmark identity selected by an edit workflow.
@@ -531,7 +531,7 @@ public final class BookmarkService {
     @discardableResult
     public func updateBibleBookmark(
         id: UUID,
-        ordinalRange: VerifiedKJVAOrdinalRange,
+        ordinalRange: any BibleBookmarkOrdinalRange,
         wholeVerse: Bool,
         startOffset: Int?,
         endOffset: Int?
@@ -573,7 +573,7 @@ public final class BookmarkService {
      - Side effects: none.
      - Failure modes: Compilation fails and directs callers to the typed overload.
      */
-    @available(*, unavailable, message: "Use addBibleBookmark(ordinalRange:) with VerifiedKJVAOrdinalRange.")
+    @available(*, unavailable, message: "Use addBibleBookmark(ordinalRange:) with VerifiedBibleBookmarkRange.")
     @discardableResult
     public func addBibleBookmark(
         bookInitials: String,
@@ -591,7 +591,7 @@ public final class BookmarkService {
     }
 
     /**
-     Creates a paragraph-break bookmark from an explicitly verified source-to-KJVA mapping.
+     Creates a paragraph-break bookmark from an validated source range and Android lookup projection.
 
      - Parameters:
        - ordinalRange: Typed boundary containing exact source coordinates and their validated KJVA
@@ -604,7 +604,7 @@ public final class BookmarkService {
      */
     @discardableResult
     public func addParagraphBreakBibleBookmark(
-        ordinalRange: VerifiedKJVAOrdinalRange,
+        ordinalRange: any BibleBookmarkOrdinalRange,
         book: String? = nil
     ) -> BibleBookmark {
         ensureSystemLabels()

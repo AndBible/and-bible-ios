@@ -52,7 +52,7 @@ struct BibleReaderBookmarkActionCoordinator {
     /// Current reader book name used for legacy bookmark rows that do not carry their own book.
     private let currentBook: String
     /// Resolves exact source coordinates into a typed, verified KJVA persistence contract.
-    private let verifiedKJVAOrdinalRange: (String, Int, Int) -> VerifiedKJVAOrdinalRange?
+    private let verifiedKJVAOrdinalRange: (String, Int, Int) -> (any BibleBookmarkOrdinalRange)?
     /// Supplies the active Android-compatible notes content type for newly-created note rows.
     private let currentNotesContentType: () -> String
 
@@ -75,7 +75,7 @@ struct BibleReaderBookmarkActionCoordinator {
         bookmarkService: BookmarkService,
         payloadFactory: BibleReaderAnnotationPayloadFactory,
         currentBook: String,
-        verifiedKJVAOrdinalRange: @escaping (String, Int, Int) -> VerifiedKJVAOrdinalRange?,
+        verifiedKJVAOrdinalRange: @escaping (String, Int, Int) -> (any BibleBookmarkOrdinalRange)?,
         currentNotesContentType: @escaping () -> String
     ) {
         self.bookmarkService = bookmarkService

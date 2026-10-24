@@ -193,7 +193,7 @@ struct BibleReaderBookmarkNavigationBiblePlan: Equatable, Sendable {
     /// Exact validated persisted KJVA ordinal range.
     let kjvaOrdinalRange: ClosedRange<Int>
     /// Exact validated persisted KJVA OSIS reference.
-    let kjvaOSISReference: String
+    let kjvaOSISReference: String?
     /// Every concrete KJVA verse or introduction inside the persisted KJVA ordinal range.
     let kjvaVerses: [BibleReaderBookmarkNavigationOrdinalVerse]
     /// Already-selected destination module to retain while committing.
@@ -1210,12 +1210,17 @@ struct BibleReaderBookmarkNavigationCoordinator {
             )
         }
 
+        if target.usesLookupProjection {
+            return try planSourceBookmark(target: target, source: source, destination: destination,
+                                          sourceVerses: sourceVerses)
+        }
+
         let persistedKJVAVerses = try validatedKJVAVerses(range: target.kjvaOrdinalRange)
         let canonicalKJVAReference = Self.rangeReference(persistedKJVAVerses)
         guard canonicalKJVAReference == target.kjvaOSISReference else {
             throw BibleReaderBookmarkNavigationFailure.kjvaReferenceMismatch(
                 expected: canonicalKJVAReference,
-                actual: target.kjvaOSISReference
+                actual: target.kjvaOSISReference ?? "unavailable"
             )
         }
 
@@ -1285,6 +1290,70 @@ struct BibleReaderBookmarkNavigationCoordinator {
             destinationModuleInitials: destination.initials,
             destinationVersification: destination.versification,
             destinationOrdinalRange: destinationStart.ordinal...destinationEnd.ordinal,
+            destinationOSISReference: Self.rangeReference(destinationVerses),
+            destinationVerses: destinationVerses
+        )
+    }
+
+    /**
+     Plans a source-verified Android bookmark without reversing its lossy lookup index.
+     Recomputes the lookup span to reject tampering, converts original source verses directly,
+     and rejects unavailable destination coordinates before any reader state is changed.
+     */
+    private func planSourceBookmark(
+        target: BibleBookmarkNavigationTarget,
+        source: BibleReaderBookmarkNavigationSwordCandidate,
+        destination: BibleReaderBookmarkNavigationSwordCandidate,
+        sourceVerses: [BibleReaderBookmarkNavigationOrdinalVerse]
+    ) throws -> BibleReaderBookmarkNavigationBiblePlan {
+        guard let first = sourceVerses.first, let last = sourceVerses.last,
+              VersificationMapper.androidBookmarkLookupRange(
+                start: .init(osisBookId: first.reference.osisBookID, chapter: first.reference.chapter,
+                             verse: first.reference.verse, ordinal: first.ordinal),
+                end: .init(osisBookId: last.reference.osisBookID, chapter: last.reference.chapter,
+                           verse: last.reference.verse, ordinal: last.ordinal),
+                sourceVersification: target.sourceVersification
+              ) == target.kjvaOrdinalRange else {
+            throw BibleReaderBookmarkNavigationFailure.kjvaMappingMismatch
+        }
+        let destinationVerses = try sourceVerses.map { verse in
+            guard let converted = VersificationMapper.convert(osisBookId: verse.reference.osisBookID,
+                chapter: verse.reference.chapter, verse: verse.reference.verse,
+                from: target.sourceVersification, to: destination.versification) else {
+                throw BibleReaderBookmarkNavigationFailure.kjvaMappingMismatch
+            }
+            let address = BibleReaderBookmarkNavigationVerseAddress(osisBookID: converted.reference.osisBookId,
+                chapter: converted.reference.chapter, verse: converted.reference.verse)
+            guard let ordinal = destination.ordinalForReference(address), ordinal > 0 else {
+                throw BibleReaderBookmarkNavigationFailure.destinationMappingUnavailable(kjvaOrdinal: target.kjvaOrdinalRange.lowerBound)
+            }
+            let result = BibleReaderBookmarkNavigationOrdinalVerse(ordinal: ordinal, reference: address)
+            guard destination.referenceForOrdinal(ordinal) == result else {
+                throw BibleReaderBookmarkNavigationFailure.destinationOrdinalIdentityMismatch(kjvaOrdinal: target.kjvaOrdinalRange.lowerBound)
+            }
+            return result
+        }
+        for (previous, current) in zip(destinationVerses, destinationVerses.dropFirst()) {
+            guard current.ordinal > previous.ordinal else {
+                throw BibleReaderBookmarkNavigationFailure.destinationOrdinalsNotMonotonic(previous: previous.ordinal, current: current.ordinal)
+            }
+        }
+        guard let start = destinationVerses.first, let end = destinationVerses.last else {
+            throw BibleReaderBookmarkNavigationFailure.kjvaMappingMismatch
+        }
+        return BibleReaderBookmarkNavigationBiblePlan(
+            requestedSourceModuleInitials: target.sourceModuleInitials,
+            resolvedSourceModuleInitials: source.initials,
+            sourceVersification: target.sourceVersification,
+            sourceOrdinalRange: target.sourceOrdinalRange,
+            sourceOSISReference: target.sourceOSISReference,
+            sourceVerses: sourceVerses,
+            kjvaOrdinalRange: target.kjvaOrdinalRange,
+            kjvaOSISReference: target.kjvaOSISReference,
+            kjvaVerses: [],
+            destinationModuleInitials: destination.initials,
+            destinationVersification: destination.versification,
+            destinationOrdinalRange: start.ordinal...end.ordinal,
             destinationOSISReference: Self.rangeReference(destinationVerses),
             destinationVerses: destinationVerses
         )

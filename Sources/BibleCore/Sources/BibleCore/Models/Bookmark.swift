@@ -483,7 +483,7 @@ public final class BibleBookmark {
 
     /// Whether consumers may use this bookmark's persisted KJVA coordinates.
     public var hasTrustedPersistedOrdinals: Bool {
-        PersistedOrdinalTrustPolicy.isTrustedKJVARange(
+        PersistedOrdinalTrustPolicy.isTrustedBookmarkRange(
             metadata: ordinalTrustMetadata,
             start: kjvOrdinalStart,
             end: kjvOrdinalEnd

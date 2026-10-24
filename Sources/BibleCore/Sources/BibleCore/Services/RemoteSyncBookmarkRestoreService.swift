@@ -1372,7 +1372,7 @@ public final class RemoteSyncBookmarkRestoreService {
                   let metadata = row.ordinalTrustMetadata else {
                 return false
             }
-            return !PersistedOrdinalTrustPolicy.isTrustedKJVARange(
+            return !PersistedOrdinalTrustPolicy.isTrustedBookmarkRange(
                 metadata: metadata,
                 start: row.kjvOrdinalStart,
                 end: row.kjvOrdinalEnd
@@ -1621,7 +1621,7 @@ public final class RemoteSyncBookmarkRestoreService {
             guard metadata.state.isVerified else {
                 return metadata
             }
-            guard PersistedOrdinalTrustPolicy.isTrustedKJVARange(
+            guard PersistedOrdinalTrustPolicy.isTrustedBookmarkRange(
                 metadata: metadata,
                 start: bookmark.kjvOrdinalStart,
                 end: bookmark.kjvOrdinalEnd
@@ -1639,22 +1639,19 @@ public final class RemoteSyncBookmarkRestoreService {
             return metadata
         }
 
-        guard PersistedOrdinalTrustPolicy.isValidKJVARange(
-            start: bookmark.kjvOrdinalStart,
-            end: bookmark.kjvOrdinalEnd
-        ) else {
-            throw RemoteSyncBookmarkRestoreError.invalidColumnValue(
-                table: "BibleBookmark",
-                column: "kjvOrdinalStart/kjvOrdinalEnd"
-            )
-        }
-        return PersistedOrdinalTrustPolicy.androidImportMetadata(
+        let metadata = PersistedOrdinalTrustPolicy.androidBookmarkImportMetadata(
             sourceVersification: bookmark.v11n,
             sourceOrdinalStart: bookmark.ordinalStart,
             sourceOrdinalEnd: bookmark.ordinalEnd,
             kjvaOrdinalStart: bookmark.kjvOrdinalStart,
             kjvaOrdinalEnd: bookmark.kjvOrdinalEnd
         )
+        guard PersistedOrdinalTrustPolicy.isValidKJVARange(start: bookmark.kjvOrdinalStart, end: bookmark.kjvOrdinalEnd)
+                || PersistedOrdinalTrustPolicy.isTrustedBookmarkRange(metadata: metadata,
+                    start: bookmark.kjvOrdinalStart, end: bookmark.kjvOrdinalEnd) else {
+            throw RemoteSyncBookmarkRestoreError.invalidColumnValue(table: "BibleBookmark", column: "kjvOrdinalStart/kjvOrdinalEnd")
+        }
+        return metadata
     }
 
     /**

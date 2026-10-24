@@ -1047,7 +1047,11 @@ struct BibleReaderAnnotationPayloadFactory {
     ) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
         let bookmarkBook = bookmark.sourceBookName ?? currentBook
-        let rangeProjection = bibleBookmarkRangeProjection(
+        let sourceProjection = sourceDomainDisplayProjection(for: bookmark)
+        let rangeProjection = (ordinalProjection == .activeModule
+            && activeModule?.info.name == bookmark.sourceBookInitials
+            && activeModule.map({ VersificationMapper.versificationName(for: $0) }) == bookmark.sourceVersification
+            ? sourceProjection : nil) ?? bibleBookmarkRangeProjection(
             bookName: bookmarkBook,
             sourceStartOrdinal: bookmark.sourceOrdinalStart,
             sourceEndOrdinal: bookmark.sourceOrdinalEnd,
@@ -1063,7 +1067,13 @@ struct BibleReaderAnnotationPayloadFactory {
             kjvEndOrdinal: bookmark.kjvaOrdinalEnd,
             ordinalProjection: .activeModule
         )
-        let fullText = loadVerseText(for: textRangeProjection)
+        let fullText: String
+        if let sourceProjection,
+           let module = bookmark.sourceBookInitials.isEmpty ? activeModule : sourceModuleResolver(bookmark.sourceBookInitials) {
+            fullText = loadSourceBookmarkText(bookmark, projection: sourceProjection, module: module)
+        } else {
+            fullText = bookmark.sourceBookInitials.isEmpty ? loadVerseText(for: textRangeProjection) : ""
+        }
         // Android's ClientBibleBookmark emits ordinalRange in the requested document domain but
         // derives osisRef and every verse-range display string from bookmark.verseRange — the
         // stored range in the bookmark's own versification. Resolving the source ordinals in the
@@ -1071,7 +1081,7 @@ struct BibleReaderAnnotationPayloadFactory {
         // paired with a source v11n misresolves links for divergent canons. Unresolvable canons
         // fall back to the active-module projection.
         let displayProjection: BookmarkBridgeVerseRangeProjection
-        if ordinalProjection == .kjva, let sourceProjection = sourceDomainDisplayProjection(for: bookmark) {
+        if let sourceProjection = sourceDomainDisplayProjection(for: bookmark) {
             displayProjection = sourceProjection
         } else if ordinalProjection == .kjva {
             displayProjection = textRangeProjection
@@ -1479,6 +1489,30 @@ struct BibleReaderAnnotationPayloadFactory {
     private func bridgeBookAbbreviation(for reference: VerseKeyReference) -> String {
         BibleReaderController.defaultBooks.first(where: { $0.osisId == reference.osisBookId })?.abbreviation
             ?? reference.osisBookId
+    }
+
+    /**
+     Reads bookmark text in its retained source canon through the selected readable source module.
+     Each conversion retains the source endpoint and checks native addressability before reading;
+     missing entries yield no text. Cursor inspection is atomic and restores its prior key.
+     */
+    private func loadSourceBookmarkText(
+        _ bookmark: BibleReaderPreparedBibleBookmarkInput,
+        projection: BookmarkBridgeVerseRangeProjection,
+        module: SwordModule
+    ) -> String {
+        (projection.start.ordinal...projection.end.ordinal).compactMap { ordinal -> String? in
+            guard let ref = SwordVersification.reference(forIndex: ordinal, versification: bookmark.sourceVersification),
+                  let mapped = VersificationMapper.convert(osisBookId: ref.osisBookId, chapter: ref.chapter,
+                    verse: ref.verse, from: bookmark.sourceVersification,
+                    to: VersificationMapper.versificationName(for: module)),
+                  module.verseOrdinal(osisBookId: mapped.reference.osisBookId,
+                    chapter: mapped.reference.chapter, verse: mapped.reference.verse) != nil else { return nil }
+            let value = module.inspectVerseKeyAndRawEntryRestoringPrevious(
+                "\(mapped.reference.osisBookId).\(mapped.reference.chapter).\(mapped.reference.verse)")
+            return value.rawEntry.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     /**

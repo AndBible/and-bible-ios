@@ -577,7 +577,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      Verifies restored Android bookmarks with a NULL source module use Android's whole-verse
      fallback contract.
      *
-     * Android serializes `BibleBookmark.book == null` as a whole-verse KJVA bookmark: module
+     * Android serializes `BibleBookmark.book == null` with whole-verse behavior: module
      * metadata fields are empty, text offsets are suppressed, and the payload `v11n` falls back to
      * KJVA. iOS represents that NULL source module as an empty `bookInitials` value.
      *
@@ -621,8 +621,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(payload.v11n, JSwordKJVAVersification.name)
         XCTAssertEqual(payload.originalOrdinalRange, [123, 123])
         XCTAssertEqual(payload.ordinalRange, [john316, john316])
-        XCTAssertEqual(payload.osisRef, "John.3.16")
-        XCTAssertEqual(payload.verseRange, "John 3:16")
+        // ClientBibleBookmark derives these from bookmark.verseRange even when book is null.
+        XCTAssertEqual(payload.osisRef, "Gen.5.10")
+        XCTAssertEqual(payload.verseRange, "Genesis 5:10")
     }
 
     /**

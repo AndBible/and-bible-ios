@@ -1,6 +1,7 @@
 // AndroidBookmarkCSVTransferService.swift -- Android-compatible bookmark CSV transfer
 
 import Foundation
+import SwordKit
 import SwiftData
 
 /** Columns supported by Android's `BookmarkCsvUtils` semicolon-delimited contract. */
@@ -120,14 +121,7 @@ public enum AndroidBookmarkCSVCodec {
         var rows: [[String]] = [columns.map(\.rawValue)]
         rows.reserveCapacity(bookmarks.count + 1)
         for bookmark in bookmarks {
-            let endOrdinal = bookmark.kjvOrdinalEnd > 0
-                ? bookmark.kjvOrdinalEnd
-                : bookmark.kjvOrdinalStart
-            guard bookmark.hasTrustedPersistedOrdinals,
-                  JSwordKJVAVersification.verseReference(
-                      ordinal: bookmark.kjvOrdinalStart
-                  ) != nil,
-                  JSwordKJVAVersification.verseReference(ordinal: endOrdinal) != nil else {
+            guard bookmark.hasTrustedPersistedOrdinals else {
                 throw AndroidBookmarkCSVError.invalidExportBookmark(bookmark.id)
             }
             let values = exportValues(for: bookmark)
@@ -211,11 +205,13 @@ public enum AndroidBookmarkCSVCodec {
         let endOrdinal = bookmark.kjvOrdinalEnd > 0
             ? bookmark.kjvOrdinalEnd
             : bookmark.kjvOrdinalStart
-        let start = JSwordKJVAVersification.verseReference(ordinal: bookmark.kjvOrdinalStart)
-        let end = JSwordKJVAVersification.verseReference(ordinal: endOrdinal)
+        let start = JSwordCanon.reference(forIndex: bookmark.ordinalStart, versification: bookmark.v11n)
+        let end = JSwordCanon.reference(forIndex: max(bookmark.ordinalStart, bookmark.ordinalEnd), versification: bookmark.v11n)
         let osisReference: String
         if let start, let end {
-            osisReference = start == end ? start.osisRef : "\(start.osisRef)-\(end.osisRef)"
+            let first = "\(start.osisBookId).\(start.chapter).\(start.verse)"
+            let last = "\(end.osisBookId).\(end.chapter).\(end.verse)"
+            osisReference = start == end ? first : "\(first)-\(last)"
         } else {
             osisReference = ""
         }
@@ -231,7 +227,7 @@ public enum AndroidBookmarkCSVCodec {
             .osisReference: osisReference,
             .bibleReference: bibleReference,
             .document: bookmark.bookInitials,
-            .book: start?.osisId ?? "",
+            .book: start?.osisBookId ?? "",
             .chapterStart: start.map { String($0.chapter) } ?? "",
             .verseStart: start.map { String($0.verse) } ?? "",
             .chapterEnd: end.map { String($0.chapter) } ?? "",
@@ -475,17 +471,17 @@ public enum AndroidBookmarkCSVCodec {
 
     /** Produces Android's English fallback Bible range label for export. */
     private static func displayReference(
-        start: JSwordKJVAVerseReference?,
-        end: JSwordKJVAVerseReference?
+        start: SwordVersification.Reference?,
+        end: SwordVersification.Reference?
     ) -> String {
         guard let start, let end else { return "" }
-        let startBook = JSwordKJVAVersification.longBookName(osisId: start.osisId) ?? start.osisId
-        let endBook = JSwordKJVAVersification.longBookName(osisId: end.osisId) ?? end.osisId
+        let startBook = JSwordKJVAVersification.longBookName(osisId: start.osisBookId) ?? start.osisBookId
+        let endBook = JSwordKJVAVersification.longBookName(osisId: end.osisBookId) ?? end.osisBookId
         if start == end { return "\(startBook) \(start.chapter):\(start.verse)" }
-        if start.osisId == end.osisId, start.chapter == end.chapter {
+        if start.osisBookId == end.osisBookId, start.chapter == end.chapter {
             return "\(startBook) \(start.chapter):\(start.verse)-\(end.verse)"
         }
-        if start.osisId == end.osisId {
+        if start.osisBookId == end.osisBookId {
             return "\(startBook) \(start.chapter):\(start.verse)-\(end.chapter):\(end.verse)"
         }
         return "\(startBook) \(start.chapter):\(start.verse)-\(endBook) \(end.chapter):\(end.verse)"

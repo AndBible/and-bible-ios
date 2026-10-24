@@ -17589,10 +17589,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                         sourceOrdinalStart: firstOrdinal,
                         sourceOrdinalEnd: lastOrdinal,
                         sourceVerseCount: sourceLastVerse,
-                        bookmarkKJVAOrdinalStart: introOrdinal,
-                        bookmarkKJVAOrdinalEnd: lastOrdinal,
-                        markerKJVAOrdinalStart: firstOrdinal,
-                        markerKJVAOrdinalEnd: lastOrdinal,
+                        bookmarkKJVARange: introOrdinal...lastOrdinal,
+                        markerKJVARange: firstOrdinal...lastOrdinal,
                         readingProgressKJVABookOrdinal:
                             JSwordKJVAVersification.bibleBookOrdinal(forOsisId: osisBookId),
                         sourceVersification: JSwordKJVAVersification.name,
@@ -17795,7 +17793,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         }
     }
 
-    /** Maps captured source chapter bounds into exact rendered and KJVA owner-query ranges. */
+    /**
+     Preserves source chapter bounds independently of optional KJVA annotation queries.
+     Invalid source bounds fail preparation. Partial target mappings retain authoritative verses;
+     absent target books render without annotations. No fallback coordinate is persisted or emitted.
+     */
     private static func preparedBibleChapterStructure(
         osisBookId: String,
         chapter: Int,
@@ -17813,25 +17815,40 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
               lastReference.osisBookId == osisBookId,
               lastReference.chapter == chapter,
               firstReference.verse == 1,
-              lastReference.verse > 0,
-              let markerRange = VersificationMapper.kjvaOrdinalRange(
-                start: firstReference,
-                end: lastReference,
-                sourceVersification: sourceVersification
-              ),
-              let mappedFirst = VersificationMapper.convertStrictly(
-                osisBookId: osisBookId,
-                chapter: chapter,
-                verse: 1,
-                from: sourceVersification,
-                to: JSwordKJVAVersification.name
-              )?.reference,
-              let bookmarkStart = JSwordKJVAVersification.chapterIntroOrdinal(
-                osisId: mappedFirst.osisBookId,
-                chapter: mappedFirst.chapter
-              ) else { return nil }
+              lastReference.verse > 0 else { return nil }
+        // Content belongs to the module's canon. Annotation conversion must never veto it.
+        // Keep the usual endpoint fast path; on a partial mapping, retain only exact verses.
+        let bookmarkLookupRange = VersificationMapper.androidBookmarkLookupRange(
+            start: firstReference, end: lastReference, sourceVersification: sourceVersification
+        )
+        let markerRange = VersificationMapper.kjvaOrdinalRange(
+            start: firstReference,
+            end: lastReference,
+            sourceVersification: sourceVersification
+        ) ?? {
+            let ordinals = (1...lastReference.verse).compactMap { verse in
+                VersificationMapper.kjvaOrdinal(
+                    osisBookId: osisBookId,
+                    chapter: chapter,
+                    verse: verse,
+                    sourceVersification: sourceVersification
+                )
+            }
+            guard let first = ordinals.min(), let last = ordinals.max() else { return nil }
+            return first...last
+        }()
+        let mappedFirst = VersificationMapper.convertStrictly(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: 1,
+            from: sourceVersification,
+            to: JSwordKJVAVersification.name
+        )?.reference
+        let bookmarkStart = mappedFirst.flatMap {
+            JSwordKJVAVersification.chapterIntroOrdinal(osisId: $0.osisBookId, chapter: $0.chapter)
+        }
         var renderedSourceStart = sourceOrdinalStart
-        var renderedKJVAStart = min(bookmarkStart, markerRange.lowerBound)
+        var renderedKJVAStart = markerRange.map { min(bookmarkStart ?? $0.lowerBound, $0.lowerBound) }
         var renderedOrdinalByVerse = ordinalByVerse
         if let renderedIntroductionChapter {
             let introduction = SwordVersification.Reference(
@@ -17846,15 +17863,15 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             SwordVersification.reference(
                 forIndex: sourceIntroduction,
                 versification: sourceVersification
-            ) == introduction,
+            ) == introduction else { return nil }
             let kjvaIntroduction = VersificationMapper.kjvaOrdinal(
                 osisBookId: introduction.osisBookId,
                 chapter: introduction.chapter,
                 verse: introduction.verse,
                 sourceVersification: sourceVersification
-            ) else { return nil }
+            )
             renderedSourceStart = sourceIntroduction
-            renderedKJVAStart = kjvaIntroduction
+            if let kjvaIntroduction { renderedKJVAStart = kjvaIntroduction }
             if renderedIntroductionChapter == chapter {
                 renderedOrdinalByVerse[0] = sourceIntroduction
             }
@@ -17863,23 +17880,26 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             sourceOrdinalStart: renderedSourceStart,
             sourceOrdinalEnd: sourceOrdinalEnd,
             sourceVerseCount: lastReference.verse,
-            bookmarkKJVAOrdinalStart: min(renderedKJVAStart, markerRange.upperBound),
-            bookmarkKJVAOrdinalEnd: max(renderedKJVAStart, markerRange.upperBound),
-            markerKJVAOrdinalStart: min(renderedKJVAStart, markerRange.lowerBound),
-            markerKJVAOrdinalEnd: markerRange.upperBound,
-            readingProgressKJVABookOrdinal:
-                JSwordKJVAVersification.bibleBookOrdinal(forOsisId: mappedFirst.osisBookId),
+            bookmarkKJVARange: bookmarkLookupRange.map {
+                min(renderedKJVAStart ?? $0.lowerBound, $0.lowerBound)...max(renderedKJVAStart ?? $0.lowerBound, $0.upperBound)
+            },
+            markerKJVARange: markerRange.map { min(renderedKJVAStart ?? $0.lowerBound, $0.lowerBound)...$0.upperBound },
+            readingProgressKJVABookOrdinal: mappedFirst.flatMap {
+                JSwordKJVAVersification.bibleBookOrdinal(forOsisId: $0.osisBookId)
+            },
             sourceVersification: sourceVersification,
             ordinalByVerse: renderedOrdinalByVerse,
-            memorizationProjections: preparedMemorizationOrdinalProjections(
-                kjvaStartOrdinal: min(renderedKJVAStart, markerRange.lowerBound),
-                kjvaEndOrdinal: markerRange.upperBound,
-                targetModule: module
-            )
+            memorizationProjections: markerRange.map {
+                preparedMemorizationOrdinalProjections(
+                    kjvaStartOrdinal: min(renderedKJVAStart ?? $0.lowerBound, $0.lowerBound),
+                    kjvaEndOrdinal: $0.upperBound,
+                    targetModule: module
+                )
+            } ?? []
         )
     }
 
-    /** Maps one exact source book introduction into the rendered and KJVA owner domains. */
+    /** Maps an exact source introduction, omitting annotations when KJVA has no such book. */
     private static func preparedBibleBookIntroductionStructure(
         osisBookId: String,
         sourceVersification: String
@@ -17896,31 +17916,34 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         SwordVersification.reference(
             forIndex: sourceOrdinal,
             versification: sourceVersification
-        ) == sourceReference,
+        ) == sourceReference else { return nil }
         let kjvaOrdinal = VersificationMapper.kjvaOrdinal(
             osisBookId: sourceReference.osisBookId,
             chapter: sourceReference.chapter,
             verse: sourceReference.verse,
             sourceVersification: sourceVersification
-        ),
-        JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: kjvaOrdinal).map({
-            $0.osisId == osisBookId && $0.chapter == 0 && $0.verse == 0
-        }) == true else { return nil }
+        ).flatMap { ordinal in
+            JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: ordinal).flatMap {
+                $0.osisId == osisBookId && $0.chapter == 0 && $0.verse == 0 ? ordinal : nil
+            }
+        }
         return BibleReaderPreparedBibleChapterStructure(
             sourceOrdinalStart: sourceOrdinal,
             sourceOrdinalEnd: sourceOrdinal,
             sourceVerseCount: 0,
-            bookmarkKJVAOrdinalStart: kjvaOrdinal,
-            bookmarkKJVAOrdinalEnd: kjvaOrdinal,
-            markerKJVAOrdinalStart: kjvaOrdinal,
-            markerKJVAOrdinalEnd: kjvaOrdinal,
+            bookmarkKJVARange: VersificationMapper.androidBookmarkLookupRange(
+                start: .init(osisBookId: osisBookId, chapter: 0, verse: 0, ordinal: sourceOrdinal),
+                end: .init(osisBookId: osisBookId, chapter: 0, verse: 0, ordinal: sourceOrdinal),
+                sourceVersification: sourceVersification
+            ),
+            markerKJVARange: kjvaOrdinal.map { $0...$0 },
             readingProgressKJVABookOrdinal:
                 JSwordKJVAVersification.bibleBookOrdinal(forOsisId: osisBookId),
             sourceVersification: sourceVersification,
             ordinalByVerse: [0: sourceOrdinal],
-            memorizationProjections: [
-                .init(renderedOrdinal: sourceOrdinal, kjvaOrdinal: kjvaOrdinal),
-            ]
+            memorizationProjections: kjvaOrdinal.map {
+                [.init(renderedOrdinal: sourceOrdinal, kjvaOrdinal: $0)]
+            } ?? []
         )
     }
 
@@ -18028,19 +18051,18 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         ordinalStartOverride: Int? = nil
     ) -> BibleReaderBibleDocumentOwnerSnapshot {
         let renderedOSISReference = renderedOSISReference ?? "\(osisBookId).\(chapter)"
-        let bookmarks = (bookmarkService?.bookmarks(
-            for: structure.bookmarkKJVAOrdinalStart,
-            endOrdinal: structure.bookmarkKJVAOrdinalEnd
-        ) ?? [])
+        let bookmarks = (structure.bookmarkKJVARange.flatMap {
+            bookmarkService?.bookmarks(for: $0.lowerBound, endOrdinal: $0.upperBound)
+        } ?? [])
             .map {
                 BibleReaderPreparedBibleBookmarkInput(
                     $0,
                     unlabeledLabelID: Self.unlabeledLabelId
                 )
             }
-        let markers = myDocumentStore?.aiDocMarkers(
-            kjvaRange: structure.markerKJVAOrdinalStart...structure.markerKJVAOrdinalEnd
-        ) ?? []
+        let markers = structure.markerKJVARange.flatMap {
+            myDocumentStore?.aiDocMarkers(kjvaRange: $0)
+        } ?? []
         let memorized = preparedRenderedMemorizationOrdinals(
             structure: structure,
             target: false
@@ -18098,18 +18120,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         structure: BibleReaderPreparedBibleChapterStructure,
         target: Bool
     ) -> [Int] {
-        guard let store = memorizationProgressStore else { return [] }
+        guard let store = memorizationProgressStore,
+              let range = structure.markerKJVARange else { return [] }
         let stored = Set(
             target
                 ? store.targetOrdinals(
                     bookInitials: "",
-                    startOrdinal: structure.markerKJVAOrdinalStart,
-                    endOrdinal: structure.markerKJVAOrdinalEnd
+                    startOrdinal: range.lowerBound,
+                    endOrdinal: range.upperBound
                 )
                 : store.memorizedOrdinals(
                     bookInitials: "",
-                    startOrdinal: structure.markerKJVAOrdinalStart,
-                    endOrdinal: structure.markerKJVAOrdinalEnd
+                    startOrdinal: range.lowerBound,
+                    endOrdinal: range.upperBound
                 )
         )
         return structure.memorizationProjections
@@ -20700,40 +20723,31 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     }
 
     /**
-     Resolves a rendered reader bookmark selection into Android's inclusive KJVA storage span.
-
-     Newly-created iOS bookmarks keep their source ordinals for local fidelity, but Android backup
-     compatibility depends on KJVA ordinals. This uses the memorization resolver's proven
-     rendered-to-KJVA path so bookmark creation, restore, and chapter queries share one durable key.
+     Preserves a rendered bookmark's source identity and derives Android's lookup span.
 
      - Parameters:
-       - bookInitials: Exact source module initials supplied by the bridge event.
+       - bookInitials: Source module initials supplied by the bridge event.
        - startOrdinal: First rendered ordinal reported by Vue.
        - endOrdinal: Last rendered ordinal reported by Vue.
-     - Returns: Exact source coordinates and their verified inclusive KJVA span, or `nil` when the
-       rendered selection cannot be represented in KJVA.
-     - Side effects: May temporarily move the active SWORD module cursor through
-       `memorizationOrdinalResolution`.
-     - Failure modes: Returns `nil` for missing or mismatched source-module identity, invalid
-       endpoints, unsupported source versification, or references without an authoritative KJVA
-       mapping.
+     - Returns: Validated source coordinates plus the independent KJVA lookup projection.
+     - Side effects: Reads pinned canon tables; does not move the module cursor.
+     - Failure modes: Returns nil for a stale module identity or invalid source coordinates.
+       A missing exact KJVA equivalent does not invalidate a source bookmark.
      */
     private func bookmarkStorageKJVARange(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
-    ) -> VerifiedKJVAOrdinalRange? {
-        let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
-        let lower = min(startOrdinal, effectiveEndOrdinal)
-        let upper = max(startOrdinal, effectiveEndOrdinal)
-        guard let resolution = memorizationOrdinalResolution(
-            bookInitials: bookInitials,
-            startOrdinal: lower,
-            endOrdinal: upper
-        ) else {
-            return nil
-        }
-        return resolution.verifiedRange
+    ) -> VerifiedBibleBookmarkRange? {
+        guard let source = activeModule,
+              SwordJavaStringIdentity.equalsIgnoreCase(bookInitials, source.info.name) else { return nil }
+        let upper = endOrdinal > 0 ? endOrdinal : startOrdinal
+        return VerifiedBibleBookmarkRange(
+            sourceBookInitials: source.info.name,
+            sourceVersification: activeSourceVersificationName(),
+            sourceOrdinalStart: min(startOrdinal, upper),
+            sourceOrdinalEnd: max(startOrdinal, upper)
+        )
     }
 
     /**
@@ -21056,11 +21070,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
            JSwordKJVAVersification.verseReference(ordinal: endOrdinal) != nil {
             return sourceBounds.closedRange
         }
-        guard let range = bookmarkStorageKJVARange(
+        guard let range = memorizationOrdinalResolution(
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal
-        ), let cacheBounds = AIReaderSourceRange.bibleBounds(
+        )?.verifiedRange, let cacheBounds = AIReaderSourceRange.bibleBounds(
             start: range.kjvaOrdinalStart,
             end: range.kjvaOrdinalEnd
         ) else {
