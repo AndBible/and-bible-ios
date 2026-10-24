@@ -12,7 +12,7 @@ import SwordKit
  contract prevents list code from fabricating a chapter or dropping a generic bookmark target.
  */
 public enum BookmarkNavigationTarget: Equatable, Sendable {
-    /// Exact Bible range with source and Android KJVA identity.
+    /// Exact source Bible range with independent Android lookup coordinates.
     case bible(BibleBookmarkNavigationTarget)
 
     /// Exact key in a non-Bible module.
@@ -22,8 +22,8 @@ public enum BookmarkNavigationTarget: Equatable, Sendable {
 /**
  Exact Bible bookmark destination emitted to the reader.
 
- The KJVA OSIS range is suitable for Android-compatible history and cross-module conversion. The
- source fields let the reader prefer the original module and versification when it is installed.
+ The source fields identify the passage and let the reader prefer its original module. KJVA
+ fields may only be lookup projections; `usesLookupProjection` prevents treating them as identity.
  Callers must map these coordinates strictly into the active module; none of the ordinal fields may
  be reinterpreted in a different versification.
  */
@@ -43,8 +43,11 @@ public struct BibleBookmarkNavigationTarget: Equatable, Sendable {
     /// Inclusive Android KJVA ordinal range.
     public let kjvaOrdinalRange: ClosedRange<Int>
 
-    /// Exact KJVA OSIS reference or range, such as `John.3.16-John.3.18`.
-    public let kjvaOSISReference: String
+    /// KJVA lookup reference when addressable; not passage identity for a lookup-only projection.
+    public let kjvaOSISReference: String?
+
+    /// True only for a source-verified Android lookup projection without an exact KJVA equivalent.
+    public let usesLookupProjection: Bool
 
     /**
      Creates one already-validated Bible destination.
@@ -55,7 +58,8 @@ public struct BibleBookmarkNavigationTarget: Equatable, Sendable {
        - sourceOrdinalRange: Inclusive source ordinal range.
        - sourceOSISReference: Exact source-versification OSIS reference or range.
        - kjvaOrdinalRange: Inclusive Android KJVA ordinal range.
-       - kjvaOSISReference: Exact KJVA OSIS reference or range.
+       - kjvaOSISReference: Optional addressable KJVA lookup reference.
+       - usesLookupProjection: Whether only the source coordinates identify the exact passage.
      - Side effects: None.
      - Failure modes: Validation belongs to `BookmarkNavigationTargetResolver`.
      */
@@ -65,7 +69,8 @@ public struct BibleBookmarkNavigationTarget: Equatable, Sendable {
         sourceOrdinalRange: ClosedRange<Int>,
         sourceOSISReference: String,
         kjvaOrdinalRange: ClosedRange<Int>,
-        kjvaOSISReference: String
+        kjvaOSISReference: String?,
+        usesLookupProjection: Bool = false
     ) {
         self.sourceModuleInitials = sourceModuleInitials
         self.sourceVersification = sourceVersification
@@ -73,6 +78,7 @@ public struct BibleBookmarkNavigationTarget: Equatable, Sendable {
         self.sourceOSISReference = sourceOSISReference
         self.kjvaOrdinalRange = kjvaOrdinalRange
         self.kjvaOSISReference = kjvaOSISReference
+        self.usesLookupProjection = usesLookupProjection
     }
 }
 
@@ -204,23 +210,26 @@ public enum BookmarkNavigationTargetResolver {
         let kjvaEnd = bookmark.kjvOrdinalEnd > 0
             ? bookmark.kjvOrdinalEnd
             : bookmark.kjvOrdinalStart
-        guard bookmark.kjvOrdinalStart > 0,
-              kjvaEnd >= bookmark.kjvOrdinalStart,
-              let start = JSwordKJVAVersification.referenceIncludingIntroductions(
-                  ordinal: bookmark.kjvOrdinalStart
-              ),
-              let end = JSwordKJVAVersification.referenceIncludingIntroductions(
-                  ordinal: kjvaEnd
-              ) else {
+        // Older Android imports can already carry verifiedAndroid provenance. Determine
+        // lookup semantics from the retained source rather than the metadata version alone.
+        let projection = VerifiedBibleBookmarkRange(
+            sourceBookInitials: bookmark.bookInitials.isEmpty ? "Android" : bookmark.bookInitials,
+            sourceVersification: sourceVersification,
+            sourceOrdinalStart: bookmark.ordinalStart, sourceOrdinalEnd: sourceEnd
+        )
+        let lookupOnly = projection?.ordinalTrust.state == .verifiedBookmarkProjectionV1
+            && projection?.kjvaOrdinalStart == bookmark.kjvOrdinalStart
+            && projection?.kjvaOrdinalEnd == kjvaEnd
+        let start = JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: bookmark.kjvOrdinalStart)
+        let end = JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: kjvaEnd)
+        guard lookupOnly || (bookmark.kjvOrdinalStart > 0 && kjvaEnd >= bookmark.kjvOrdinalStart
+                            && start != nil && end != nil) else {
             throw BookmarkNavigationTargetError.invalidBibleOrdinals(
-                start: bookmark.kjvOrdinalStart,
-                end: bookmark.kjvOrdinalEnd
-            )
+                start: bookmark.kjvOrdinalStart, end: bookmark.kjvOrdinalEnd)
         }
-
-        let osisReference = start.ordinal == end.ordinal
-            ? start.osisRef
-            : "\(start.osisRef)-\(end.osisRef)"
+        let osisReference = start.flatMap { start in
+            end.map { end in start.ordinal == end.ordinal ? start.osisRef : "\(start.osisRef)-\(end.osisRef)" }
+        }
         let sourceStartOSIS = sourceOSISReference(sourceStart)
         let sourceEndOSIS = sourceOSISReference(sourceFinish)
         let sourceOSISReference = sourceStart == sourceFinish
@@ -235,7 +244,8 @@ public enum BookmarkNavigationTargetResolver {
             sourceOrdinalRange: bookmark.ordinalStart...sourceEnd,
             sourceOSISReference: sourceOSISReference,
             kjvaOrdinalRange: bookmark.kjvOrdinalStart...kjvaEnd,
-            kjvaOSISReference: osisReference
+            kjvaOSISReference: osisReference,
+            usesLookupProjection: lookupOnly
         ))
     }
 

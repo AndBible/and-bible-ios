@@ -4,7 +4,7 @@ import Foundation
 import SwordKit
 
 /**
- Describes whether persisted KJVA ordinals may be consumed as authoritative coordinates.
+ Describes the provenance and permitted interpretation of persisted ordinal fields.
 
  The raw value is stored in SwiftData and JSON so legacy rows remain quarantined until a migration
  can establish their source. Unknown future values must decode as `legacyUnresolved`.
@@ -16,15 +16,18 @@ public enum PersistedOrdinalTrustState: String, Codable, Sendable, Equatable {
     /// KJVA coordinates produced by the version-one strict mapping boundary.
     case verifiedMappingV1
 
+    /// Validated bookmark source with an Android lookup projection; not an exact KJVA passage.
+    case verifiedBookmarkProjectionV1
+
     /// Legacy source coordinates whose named module is not currently installed.
     case legacyPendingModule
 
     /// Legacy coordinates whose provenance cannot be established safely.
     case legacyUnresolved
 
-    /// Whether this state permits consumers to use the stored KJVA coordinates.
+    /// Whether provenance is established. Domain-specific policy still determines permitted use.
     public var isVerified: Bool {
-        self == .verifiedAndroid || self == .verifiedMappingV1
+        self == .verifiedAndroid || self == .verifiedMappingV1 || self == .verifiedBookmarkProjectionV1
     }
 }
 
@@ -38,7 +41,7 @@ public enum PersistedOrdinalProvenance: String, Codable, Sendable, Equatable {
     /// No trustworthy source boundary is known.
     case unknown
 
-    /// A native write supplied exact source metadata and strict KJVA mapping output.
+    /// A native write supplied validated source metadata and derived lookup or exact KJVA fields.
     case nativeMapping
 
     /// A validated Android database or remote patch supplied the KJVA coordinates.
@@ -676,7 +679,7 @@ public enum PersistedOrdinalTrustPolicy {
                 return false
             }
             return mappedRange.lowerBound == start && mappedRange.upperBound == end
-        case .legacyPendingModule, .legacyUnresolved:
+        case .verifiedBookmarkProjectionV1, .legacyPendingModule, .legacyUnresolved:
             return false
         }
     }
@@ -774,7 +777,7 @@ public enum PersistedOrdinalTrustPolicy {
             return isTrustedKJVARange(metadata: subset, start: subsetStart, end: subsetEnd)
                 ? subset
                 : nil
-        case .legacyPendingModule, .legacyUnresolved:
+        case .verifiedBookmarkProjectionV1, .legacyPendingModule, .legacyUnresolved:
             return nil
         }
     }
