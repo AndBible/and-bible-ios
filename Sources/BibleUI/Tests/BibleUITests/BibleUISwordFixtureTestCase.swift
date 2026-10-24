@@ -539,10 +539,10 @@ class BibleUISwordFixtureTestCase: XCTestCase {
        - moduleName: Exact installed module initials.
        - description: Human-readable module description.
        - versification: Pinned JSword/SWORD canon name.
-       - entries: Old-testament coordinates and synthetic OSIS source stored at those exact rows.
+       - entries: Source-canon coordinates and synthetic OSIS source stored at those exact rows.
        - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
      - Side effects: Writes a config plus sparse RawText data/index files under the temporary root.
-     - Failure modes: Unsupported canons, invalid or new-testament coordinates, oversized records,
+     - Failure modes: Unsupported canons, invalid coordinates, oversized records,
        and filesystem failures throw before a partial module becomes observable to a manager.
      */
     func seedSyntheticRawTextBibleModule(
@@ -567,7 +567,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
             }
             return (row: row, entry: entry)
         }
-        guard let highestRow = indexedEntries.map(\.row).max() else {
+        guard !indexedEntries.isEmpty else {
             throw SyntheticRawTextBibleFixtureError.missingEntries
         }
         let moduleKey = moduleName.lowercased()
@@ -586,32 +586,38 @@ class BibleUISwordFixtureTestCase: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        var data = Data()
-        var index = [UInt8](repeating: 0, count: (highestRow + 1) * 6)
-        for (row, entry) in indexedEntries {
-            let record = Data(entry.text.utf8)
-            guard record.count <= Int(UInt16.max), data.count <= Int(UInt32.max) else {
-                throw SyntheticRawTextBibleFixtureError.recordTooLarge
+        // RawVerse indexes each testament separately; Matthew's book heading is row 2
+        // (followed by its chapter heading and verse 1 at rows 3 and 4).
+        let newTestamentStart = try XCTUnwrap(SwordVersification.referenceIndex(
+            for: .init(osisBookId: "Matt", chapter: 0, verse: 0),
+            versification: versification
+        )) - 2
+        for testament in ["ot", "nt"] {
+            let offset = testament == "nt" ? newTestamentStart : 0
+            let rows = indexedEntries.filter { ($0.row >= newTestamentStart) == (testament == "nt") }
+            var data = Data()
+            var index = [UInt8](repeating: 0, count: ((rows.map(\.row).max() ?? offset) - offset + 1) * 6)
+            for (row, entry) in rows {
+                let record = Data(entry.text.utf8)
+                guard record.count <= Int(UInt16.max), data.count <= Int(UInt32.max) else {
+                    throw SyntheticRawTextBibleFixtureError.recordTooLarge
+                }
+                let dataOffset = UInt32(data.count)
+                let recordLength = UInt16(record.count)
+                let indexOffset = (row - offset) * 6
+                index[indexOffset] = UInt8(dataOffset & 0x0000_00ff)
+                index[indexOffset + 1] = UInt8((dataOffset >> 8) & 0x0000_00ff)
+                index[indexOffset + 2] = UInt8((dataOffset >> 16) & 0x0000_00ff)
+                index[indexOffset + 3] = UInt8((dataOffset >> 24) & 0x0000_00ff)
+                index[indexOffset + 4] = UInt8(recordLength & 0x00ff)
+                index[indexOffset + 5] = UInt8((recordLength >> 8) & 0x00ff)
+                data.append(record)
+                data.append(0x0A)
             }
-            let dataOffset = UInt32(data.count)
-            let recordLength = UInt16(record.count)
-            let indexOffset = row * 6
-            index[indexOffset] = UInt8(dataOffset & 0x0000_00ff)
-            index[indexOffset + 1] = UInt8((dataOffset >> 8) & 0x0000_00ff)
-            index[indexOffset + 2] = UInt8((dataOffset >> 16) & 0x0000_00ff)
-            index[indexOffset + 3] = UInt8((dataOffset >> 24) & 0x0000_00ff)
-            index[indexOffset + 4] = UInt8(recordLength & 0x00ff)
-            index[indexOffset + 5] = UInt8((recordLength >> 8) & 0x00ff)
-            data.append(record)
-            data.append(0x0A)
-        }
 
-        try data.write(to: dataDirectory.appendingPathComponent("ot", isDirectory: false))
-        try Data(index).write(
-            to: dataDirectory.appendingPathComponent("ot.vss", isDirectory: false)
-        )
-        try Data().write(to: dataDirectory.appendingPathComponent("nt", isDirectory: false))
-        try Data().write(to: dataDirectory.appendingPathComponent("nt.vss", isDirectory: false))
+            try data.write(to: dataDirectory.appendingPathComponent(testament))
+            try Data(index).write(to: dataDirectory.appendingPathComponent("\(testament).vss"))
+        }
         try """
         [\(moduleName)]
         Description=\(description)

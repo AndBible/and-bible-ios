@@ -27,10 +27,9 @@ struct BibleReaderPreparedBibleChapterStructure: Sendable {
     let sourceOrdinalStart: Int
     let sourceOrdinalEnd: Int
     let sourceVerseCount: Int
-    let bookmarkKJVAOrdinalStart: Int
-    let bookmarkKJVAOrdinalEnd: Int
-    let markerKJVAOrdinalStart: Int
-    let markerKJVAOrdinalEnd: Int
+    /// Nil when no authoritative target-domain annotation position exists.
+    let bookmarkKJVARange: ClosedRange<Int>?
+    let markerKJVARange: ClosedRange<Int>?
     let readingProgressKJVABookOrdinal: Int?
     let sourceVersification: String
     let ordinalByVerse: [Int: Int]
