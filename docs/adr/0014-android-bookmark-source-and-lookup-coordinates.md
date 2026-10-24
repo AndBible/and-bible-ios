@@ -3,8 +3,8 @@ adr: ADR-0014
 title: "Android Bookmark Source and Lookup Coordinates"
 description: "Preserve Android bookmark identity in its source versification while supporting Android's KJVA lookup projections, including fallback projections."
 date: 2026-10-24
-status: proposed
-review-status: pending_review
+status: accepted
+review-status: reviewed
 extends: []
 extended-by: []
 amends: [ADR-0010, ADR-0013]
@@ -12,7 +12,7 @@ amended-by: []
 supersedes: []
 superseded-by: null
 decision-owner: "iOS parity maintainers"
-deciders: []
+deciders: ["primetheus"]
 consulted: ["Android BookmarkEntities and BookmarksDao", "JSword VersificationConverter and Versification"]
 informed: []
 tags: [bookmarks, versification, android, parity]
@@ -24,7 +24,7 @@ related-work-items: ["issue #441", "PR #442"]
 
 ## Decision
 
-Propose matching Android's Bible bookmark contract for all supported source
+Match Android's Bible bookmark contract for all supported source
 versifications. A bookmark's original `v11n`, `ordinalStart`, and `ordinalEnd`
 identify the selected source passage. The `kjvOrdinalStart` and `kjvOrdinalEnd`
 fields are Android-compatible lookup projections, not proof that the source
@@ -44,7 +44,7 @@ than reverse-converting a lossy lookup index. Cross-module behavior must follow
 Android's source-range conversion, including its treatment of unsupported
 positions. A successful save alone is insufficient implementation of this decision.
 
-This proposal replaces ADR-0010 decision 3 and its strict-failure consequence
+This decision replaces ADR-0010 decision 3 and its strict-failure consequence
 only where they prohibit Android-compatible bookmark lookup projections. The
 registered-versification/module-admission rules and strict boundaries for other
 persisted features remain in force.
@@ -54,6 +54,11 @@ verified source identity and a reproducible Android lookup projection are valid
 bookmark provenance even without an exact KJVA equivalent. Legacy rows with
 unknown provenance remain quarantined. The premise that all Android bookmark
 lookup coordinates are authoritative KJVA passages no longer applies.
+
+## Acceptance
+
+Accepted by primetheus on 2026-10-24 through the explicit instruction to approve
+and merge PR #443. The acceptance commit records that human decision.
 
 ## Why this came up
 
@@ -82,7 +87,7 @@ bookmark workflow. It does not meet the requested behavior.
 ### Relax the shared strict KJVA gate for every persisted feature
 
 This could make the save succeed, but would expose progress and memorization
-consumers to coordinates they currently treat as exact passages. The proposal
+consumers to coordinates they currently treat as exact passages. The decision
 limits the change to bookmarks and makes projection fidelity explicit.
 
 ### Store a generic bookmark instead of a Bible bookmark
@@ -98,7 +103,8 @@ Bible bookmark behavior. Android uses a Bible bookmark with source metadata.
 - Existing valid bookmarks retain their identity, notes, labels, and StudyPad associations.
 - Previously quarantined rows may be admitted only when retained source metadata proves the
   Android-compatible projection. No guessed source identity is introduced.
-- The accepted ADRs remain unchanged until a human accepts this amendment.
+- ADRs 0010 and 0013 retain their historical text; this accepted amendment governs the
+  bookmark-specific exceptions described above.
 
 ## When to revisit this
 

@@ -6,6 +6,7 @@ description: >-
   fail-closed mapping behavior for named Bible versifications.
 date: 2026-07-19
 status: accepted
+amended-by: [ADR-0014]
 supersedes: []
 superseded-by: null
 decision-owner: "iOS parity maintainers + product"
