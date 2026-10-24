@@ -112,4 +112,4 @@ relationships. It does not judge prose or accept decisions.
 - [0012: Install Validation Follows Observed SWORD Packaging](0012-install-validation-follows-observed-sword-packaging.md)
 - [0013: Reader Annotation Parity Divergences](0013-reader-annotation-parity-divergences.md)
 
-- [0014: Android Bookmark Source and Lookup Coordinates](0014-android-bookmark-source-and-lookup-coordinates.md) (Proposed)
+- [0014: Android Bookmark Source and Lookup Coordinates](0014-android-bookmark-source-and-lookup-coordinates.md)
