@@ -578,12 +578,26 @@ jobs:
           --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
           --timeout-seconds 300
 
+      # Compilation and test execution have separate budgets. A cold Swift build must not
+      # consume the test deadline after the simulator suite has already passed.
+      - name: Build BibleView package tests
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        timeout-minutes: 10
+        run: |
+          xcodebuild build-for-testing \
+            -project AndBible.xcodeproj \
+            -scheme BibleViewTests \
+            -configuration Debug \
+            -destination "${{ steps.simulator.outputs.destination }}" \
+            -derivedDataPath "${DERIVED_DATA_PATH}" \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Run BibleView package tests
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         timeout-minutes: 10
         run: |
           mkdir -p .artifacts
-          xcodebuild test \
+          xcodebuild test-without-building \
             -project AndBible.xcodeproj \
             -scheme BibleViewTests \
             -configuration Debug \
