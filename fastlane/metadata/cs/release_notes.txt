@@ -1,4 +1,5 @@
 Tato aktualizace obsahuje opravy chyb:
-- Přečtené kapitoly se nyní spolehlivě zaznamenávají do postupu čtení.
-- Volby v nabídce záložek a postupu nyní zůstávají viditelné.
-- Položka Ohodnotit a napsat recenzi nyní otevře stránku aplikace v App Storu.
+- Starší zálohy záložek se nyní obnovují správně.
+- Opraveny uložené pozice čtení, které mohly otevřít špatnou knihu nebo kapitolu.
+- Přecházení mezi kapitolami a knihami je spolehlivější.
+- Opraveny vzácné pády při čtení knih a dokumentů EPUB.

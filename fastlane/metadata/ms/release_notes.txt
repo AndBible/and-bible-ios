@@ -1,4 +1,5 @@
 Kemas kini ini mengandungi pembetulan pepijat:
-- Bab yang anda baca kini direkodkan dengan boleh dipercayai dalam kemajuan bacaan anda.
-- Pilihan menu penanda halaman dan kemajuan kini kekal kelihatan.
-- Nilai & Ulas kini membuka halaman apl di App Store.
+- Sandaran penanda buku yang lama kini dipulihkan dengan betul.
+- Membetulkan kedudukan bacaan tersimpan yang boleh membuka buku atau pasal yang salah.
+- Navigasi antara pasal dan buku lebih boleh dipercayai.
+- Membetulkan ranap yang jarang berlaku semasa membaca buku dan dokumen EPUB.

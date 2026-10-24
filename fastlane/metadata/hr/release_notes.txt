@@ -1,4 +1,5 @@
 Ovo ažuriranje sadrži ispravke grešaka:
-- Poglavlja koja pročitate sada se pouzdano bilježe u vašem napretku čitanja.
-- Opcije izbornika za knjižne oznake i napredak sada ostaju vidljive.
-- Ocijeni i recenziraj sada otvara stranicu aplikacije u App Storeu.
+- Starije sigurnosne kopije knjižnih oznaka sada se ispravno vraćaju.
+- Ispravljeni spremljeni položaji čitanja koji su mogli otvoriti pogrešnu knjigu ili poglavlje.
+- Kretanje između poglavlja i knjiga pouzdanije je.
+- Ispravljena rijetka rušenja pri čitanju knjiga i EPUB dokumenata.

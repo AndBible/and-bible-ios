@@ -1,4 +1,5 @@
 Pembaruan ini berisi perbaikan bug:
-- Pasal yang Anda baca kini tercatat dengan andal dalam kemajuan membaca Anda.
-- Pilihan menu penanda dan kemajuan kini tetap terlihat.
-- Beri Nilai & Ulasan kini membuka halaman aplikasi di App Store.
+- Cadangan penanda lama kini dipulihkan dengan benar.
+- Memperbaiki posisi baca tersimpan yang bisa membuka buku atau pasal yang salah.
+- Navigasi antarpasal dan antarbuku lebih andal.
+- Memperbaiki crash langka saat membaca buku dan dokumen EPUB.

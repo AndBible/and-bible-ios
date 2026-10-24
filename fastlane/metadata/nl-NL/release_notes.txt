@@ -1,4 +1,5 @@
 Deze update bevat bugfixes:
-- Hoofdstukken die je leest worden nu betrouwbaar vastgelegd in je leesvoortgang.
-- De keuzes in het menu voor bladwijzers en voortgang blijven nu zichtbaar.
-- Beoordeel en schrijf een recensie opent nu de App Store-pagina van de app.
+- Oudere back-ups van bladwijzers worden nu correct hersteld.
+- Opgeslagen leesposities opgelost die het verkeerde boek of hoofdstuk konden openen.
+- Navigeren tussen hoofdstukken en boeken is betrouwbaarder.
+- Zeldzame crashes opgelost bij het lezen van boeken en EPUB-documenten.

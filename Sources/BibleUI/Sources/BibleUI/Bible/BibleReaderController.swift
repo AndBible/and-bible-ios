@@ -6806,7 +6806,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      Applies the common commentary destination transaction to either native source family.
 
      Source and annotation invalidation may request one fresh current capture. Destination
-     supersession and cancellation settle without changing selection or rendered state.
+     supersession and cancellation settle without changing selection or rendered state. Accepted
+     full replacements consume their one-shot navigation target; adjacent responses do not, so
+     later category switches restore the visible passage without replaying an older explicit jump.
      */
     private func publishPreparedCommentary(
         _ outcome: BibleReaderDocumentPreparationOutcome<BibleReaderPreparedCommentaryDocument>,
@@ -6815,6 +6817,10 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         retriesOneStaleResult: Bool,
         adjacentRequest: BibleReaderAdjacentCommentaryRequest? = nil
     ) {
+        // A commentary replacement fulfills explicit navigation just as a Bible replacement
+        // does. Retain the request's one-shot target until acceptance, then retire it so a later
+        // Bible switch follows the visible commentary position rather than replaying this target.
+        let navigationAnchorRange = navigationCoordinator.originalNavigationOrdinalRange
         var queuedReplacementAnchor: (
             identity: BibleReaderCommentaryAnchorIdentity,
             ordinal: Int
@@ -6928,6 +6934,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     )
                     return
                 }
+                self.navigationCoordinator.commitAcceptedContentRestore(
+                    originalOrdinalRange: navigationAnchorRange
+                )
                 self.acceptedCommentaryAnchorPaneOwner = nil
                 self.commentaryAnchorOwner.clear()
                 if let queuedReplacementAnchor {

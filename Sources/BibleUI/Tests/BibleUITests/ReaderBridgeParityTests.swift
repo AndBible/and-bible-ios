@@ -3078,8 +3078,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
      while the exact commentary key still owns it.
 
      The real Calvin fixture yields document-local ordinal 11 inside Genesis 1:24. The test accepts
-     that visible callback, visits the same KJV position, and returns through the public document
-     switches. One delayed Genesis 1:22 callback from the outgoing Bible document arrives while the
+     that visible callback after explicit next/previous block navigation, verifies that the Bible
+     setup targets the visible verse rather than the consumed jump, and returns through the public
+     document switches. One delayed Genesis 1:22 callback from the outgoing Bible document arrives while the
      commentary replacement is pending. The stale callback must not rewrite the selected Genesis
      1:24 intent or its durable PageManager position. Vue must then receive ordinal 11 in
      `setup_content` without waiting for another scroll callback. A later visit to Genesis 1:22
@@ -3118,6 +3119,13 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             event: "add_documents",
             after: boundary
         )
+        // Reproduce real toolbar navigation before scrolling. These explicit targets must be
+        // consumed by commentary publication, not replayed by the later Bible replacement.
+        for verse in [24, 22] {
+            boundary = scripts().count
+            XCTAssertTrue(controller.navigateTo(book: "Genesis", chapter: 1, verse: verse))
+            _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: boundary)
+        }
         boundary = scripts().count
         controller.bridge(bridge, requestMoreToEnd: 8191)
         let awaitedResponse = try await awaitBridgeScript(
@@ -3166,6 +3174,19 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             event: "add_documents",
             after: boundary
         )
+        let bibleSetupScript = try await awaitBridgeEmission(
+            from: scripts, event: "setup_content", after: boundary
+        )
+        let bibleSetup = try XCTUnwrap(
+            bridgeEmissionPayload(from: bibleSetupScript, event: "setup_content") as? [String: Any]
+        )
+        let expectedBibleOrdinal = try XCTUnwrap(manager.module(named: "KJV")?.verseOrdinal(
+            osisBookId: "Gen", chapter: 1, verse: 24
+        ))
+        XCTAssertEqual(bibleSetup["jumpToOrdinal"] as? Int, expectedBibleOrdinal,
+                       "Returning to Bible must follow the visible commentary block, not the old toolbar target")
+        XCTAssertTrue(bibleSetup["jumpToAnchor"] == nil || bibleSetup["jumpToAnchor"] is NSNull,
+                      "A consumed commentary navigation must not highlight an old Bible verse")
         boundary = scripts().count
         XCTAssertEqual(controller.switchCommentaryDocument(to: "CALVINRESTORE"), .switched)
         let outgoingBibleOrdinal = try XCTUnwrap(
