@@ -7,6 +7,7 @@ description: >-
   own scoped changes.
 date: 2026-08-08
 status: accepted
+amended-by: [ADR-0014]
 supersedes: []
 superseded-by: null
 decision-owner: "iOS parity maintainers"
